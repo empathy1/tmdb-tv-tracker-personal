@@ -1,9 +1,11 @@
+
 import { colors, spacing } from "@/constants/theme";
 import { StyleSheet } from "react-native";
 
 export { colors };
 
 export const globalStyles = StyleSheet.create({
+  // Layout
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -13,10 +15,35 @@ export const globalStyles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
   },
 
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+
+  // Titoli
+  screenTitle: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: "700",
+  },
+
+  sectionTitle: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: "700",
+    marginBottom: spacing.md,
+  },
+
   title: {
     color: colors.text,
     fontSize: 24,
     fontWeight: "700",
+  },
+
+  // Testi
+  text: {
+    color: colors.text,
+    fontSize: 14,
   },
 
   subtitle: {
@@ -29,10 +56,54 @@ export const globalStyles = StyleSheet.create({
     fontSize: 13,
   },
 
+  // Ricerca
+  searchInput: {
+    backgroundColor: colors.surface,
+    color: colors.text,
+    padding: spacing.md,
+    borderRadius: 10,
+  },
+
+  // Filtri
+  filterRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginTop: spacing.lg,
+    marginBottom: spacing.lg,
+  },
+
+  filterButton: {
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: 8,
+  },
+
+  filterButtonActive: {
+    backgroundColor: colors.primary,
+  },
+
+  filterText: {
+    color: colors.text,
+    fontWeight: "600",
+  },
+
+  filterTextActive: {
+    color: colors.background,
+  },
+
+  // Stati
   loading: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: colors.background,
+  },
+
+  empty: {
+    color: colors.textSecondary,
+    textAlign: "center",
+    marginTop: spacing.md,
   },
 });
