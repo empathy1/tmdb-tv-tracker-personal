@@ -23,8 +23,10 @@ import type {
 
 import MediaCard from "@/components/MediaCard";
 import { spacing } from "@/constants/theme";
+import { useTitleLanguage } from "@/contexts/LanguageContext";
 import { colors, globalStyles } from "@/styles/global";
 import { getMediaCardLayout } from "@/utils/mediaLayout";
+import { useRouter } from "expo-router";
 
 type Filter = "all" | "series" | "movies";
 
@@ -44,7 +46,8 @@ export default function Search() {
     screenWidth,
     false,
   );
-
+  const router = useRouter();
+  const { titleLanguage } = useTitleLanguage();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
 
@@ -66,7 +69,7 @@ export default function Search() {
     }, 500);
 
     return () => clearTimeout(timeout);
-  }, [query, filter]);
+  }, [query, filter, titleLanguage]);
 
   async function loadResults(searchQuery: string) {
     try {
@@ -76,7 +79,7 @@ export default function Search() {
       let items: SearchItem[] = [];
 
       if (filter === "series") {
-        const data = await searchTv(searchQuery);
+        const data = await searchTv(searchQuery, titleLanguage);
 
         items = data.results.map((item: TMDBTvSearchResult) => ({
           id: item.id,
@@ -90,7 +93,7 @@ export default function Search() {
           type: "series",
         }));
       } else if (filter === "movies") {
-        const data = await searchMovie(searchQuery);
+        const data = await searchMovie(searchQuery, titleLanguage);
 
         items = data.results.map((item: TMDBMovieSearchResult) => ({
           id: item.id,
@@ -105,8 +108,8 @@ export default function Search() {
         }));
       } else {
         const [seriesData, movieData] = await Promise.all([
-          searchTv(searchQuery),
-          searchMovie(searchQuery),
+          searchTv(searchQuery, titleLanguage),
+          searchMovie(searchQuery, titleLanguage),
         ]);
 
         const seriesItems: SearchItem[] = seriesData.results.map((item) => ({
@@ -249,11 +252,17 @@ export default function Search() {
                 poster={item.poster}
                 info={info}
                 onPress={() => {
-                  console.log(
-                    "Selezionato:",
-                    item.type,
-                    item.id
-                  );
+                  if (item.type === "movie") {
+                    router.push({
+                      pathname: "/details/movie/[id]",
+                      params: { id: String(item.id) },
+                    });
+                  } else {
+                    router.push({
+                      pathname: "/details/series/[id]",
+                      params: { id: String(item.id) },
+                    });
+                  }
                 }}
               />
             );
