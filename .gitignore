@@ -43,3 +43,8 @@ example
 # generated native folders
 /ios
 /android
+
+
+# File di migrazione e dati legacy
+/archive/
+/src/database/legacy-watch-history.json
