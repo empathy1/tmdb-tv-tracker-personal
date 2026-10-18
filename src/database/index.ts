@@ -1,6 +1,10 @@
 import * as SQLite from "expo-sqlite";
 
-import type { TMDBTvDetails, TMDBTvSeasonDetails } from "@/types/tmdb";
+import type {
+  TMDBMovieDetails,
+  TMDBTvDetails,
+  TMDBTvSeasonDetails,
+} from "@/types/tmdb";
 
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
@@ -45,15 +49,7 @@ export async function saveTvSeriesDetails(
       watch_status
     )
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(tmdb_id) DO UPDATE SET
-      tvdb_id = excluded.tvdb_id,
-      imdb_id = excluded.imdb_id,
-      title = excluded.title,
-      poster_path = excluded.poster_path,
-      status = excluded.status,
-      backdrop_path = excluded.backdrop_path,
-      overview = excluded.overview,
-      first_air_date = excluded.first_air_date`,
+    ON CONFLICT(tmdb_id) DO NOTHING`,
     details.id,
     externalIds.tvdb_id,
     externalIds.imdb_id,
@@ -67,6 +63,36 @@ export async function saveTvSeriesDetails(
   );
 }
 
+export async function saveMovieDetails(
+  details: TMDBMovieDetails,
+  externalIds: {
+    imdb_id: string | null;
+  },
+): Promise<void> {
+  const db = await getDatabase();
+
+  await db.runAsync(
+    `INSERT INTO movies (
+      tmdb_id,
+      imdb_id,
+      title,
+      poster_path,
+      backdrop_path,
+      overview,
+      release_date
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(tmdb_id) DO NOTHING`,
+    details.id,
+    externalIds.imdb_id,
+    details.title,
+    details.poster_path,
+    details.backdrop_path,
+    details.overview,
+    details.release_date || null,
+  );
+}
+
 export async function saveTvSeasonEpisodes(
   seriesTmdbId: number,
   season: TMDBTvSeasonDetails,
@@ -76,7 +102,7 @@ export async function saveTvSeasonEpisodes(
   await db.withTransactionAsync(async () => {
     for (const episode of season.episodes) {
       await db.runAsync(
-        `INSERT INTO episodes (
+        `INSERT OR IGNORE INTO episodes (
           series_tmdb_id,
           season_number,
           episode_number,
@@ -87,15 +113,7 @@ export async function saveTvSeasonEpisodes(
           still_path,
           is_special
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(series_tmdb_id, season_number, episode_number)
-        DO UPDATE SET
-          tmdb_id = excluded.tmdb_id,
-          title = excluded.title,
-          overview = excluded.overview,
-          air_date = excluded.air_date,
-          still_path = excluded.still_path,
-          is_special = excluded.is_special`,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         seriesTmdbId,
         episode.season_number,
         episode.episode_number,
@@ -151,4 +169,48 @@ export async function exportDatabaseFile(): Promise<void> {
     dialogTitle: "Esporta database TV Tracker",
     UTI: "public.database",
   });
+}
+
+export async function isTvSeriesSaved(tmdbId: number): Promise<boolean> {
+  const db = await getDatabase();
+
+  const result = await db.getFirstAsync<{ found: number }>(
+    "SELECT 1 AS found FROM series WHERE tmdb_id = ? LIMIT 1",
+    tmdbId,
+  );
+
+  return result !== null;
+}
+
+export type SavedEpisodeNumber = {
+  season_number: number;
+  episode_number: number;
+  tmdb_id: number | null;
+};
+
+export async function getSavedEpisodeNumbers(
+  seriesTmdbId: number,
+): Promise<SavedEpisodeNumber[]> {
+  const db = await getDatabase();
+
+  return db.getAllAsync<SavedEpisodeNumber>(
+    `SELECT
+       season_number,
+       episode_number,
+       tmdb_id
+     FROM episodes
+     WHERE series_tmdb_id = ?`,
+    seriesTmdbId,
+  );
+}
+
+export async function isMovieSaved(tmdbId: number): Promise<boolean> {
+  const db = await getDatabase();
+
+  const result = await db.getFirstAsync<{ found: number }>(
+    "SELECT 1 AS found FROM movies WHERE tmdb_id = ? LIMIT 1",
+    tmdbId,
+  );
+
+  return result !== null;
 }

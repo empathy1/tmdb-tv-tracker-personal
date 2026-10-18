@@ -242,6 +242,17 @@ export async function getMovieDetails(
   return details;
 }
 
+type TMDBMovieExternalIds = {
+  id: number;
+  imdb_id: string | null;
+};
+
+export async function getMovieExternalIds(
+  movieId: number,
+): Promise<TMDBMovieExternalIds> {
+  return tmdbFetch<TMDBMovieExternalIds>(`/movie/${movieId}/external_ids`);
+}
+
 export async function getTvSeasonDetails(
   tvId: number,
   seasonNumber: number,

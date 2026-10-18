@@ -1,6 +1,5 @@
-
 import { colors, spacing } from "@/constants/theme";
-import { StyleSheet } from "react-native";
+import { StyleSheet, ViewStyle } from "react-native";
 
 export { colors };
 
@@ -107,3 +106,12 @@ export const globalStyles = StyleSheet.create({
     marginTop: spacing.md,
   },
 });
+
+export function getBottomActionContainerStyle(bottomInset: number): ViewStyle {
+  return {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: Math.max(bottomInset + 30, spacing.md),
+    backgroundColor: colors.background,
+  };
+}
