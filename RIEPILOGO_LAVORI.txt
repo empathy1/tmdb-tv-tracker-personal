@@ -1,0 +1,87 @@
+# TV Tracker – Riepilogo lavori
+
+**Data:** 18 ottobre 2026  
+**Branch Git:** `main`
+
+## 1. Schermate di dettaglio di serie TV e film
+
+- Modificate le schermate di dettaglio per mantenere visibili titolo, informazioni e pulsante Indietro anche quando TMDB non restituisce un'immagine di sfondo (`backdrop`).
+- Introdotto uno sfondo di fallback per evitare che l'assenza dell'immagine faccia sparire le informazioni della testata.
+- Proseguito il lavoro per permettere di aggiungere serie TV e film alla raccolta personale.
+
+## 2. Componente condiviso per aggiungere i contenuti
+
+Creato il componente:
+
+`src/components/AddMediaButton.tsx`
+
+Lo scopo è riutilizzare lo stesso pulsante nelle diverse schermate, mantenendo un'interfaccia coerente e riducendo la duplicazione del codice.
+
+Per il salvataggio dei film sono state aggiunte le seguenti funzioni:
+
+- `getMovieExternalIds()` in `src/services/tmdb.ts`, per recuperare gli identificativi esterni del film da TMDB.
+- `saveMovieDetails()` in `src/database/index.ts`, per salvare i dati del film nel database locale.
+- `isMovieSaved()` era già presente e viene utilizzata per verificare se un film è già nella raccolta.
+
+La migrazione dei film dal vecchio database non è ancora stata completata.
+
+## 3. Centralizzazione dello stile dei pulsanti inferiori
+
+In `src/styles/global.ts` è stato centralizzato lo stile del contenitore che ospita i pulsanti fissi nella parte inferiore delle schermate.
+
+Le proprietà condivise comprendono:
+
+- Spaziatura orizzontale.
+- Spaziatura superiore.
+- Spaziatura inferiore, calcolata in base all'area sicura del dispositivo.
+- Colore di sfondo.
+
+L'obiettivo è evitare di ripetere lo stesso blocco di stile nelle schermate di dettaglio e negli altri punti dell'app che utilizzano pulsanti inferiori.
+
+## 4. Database e migrazione
+
+È stata aggiunta la colonna `source` alla tabella `series`.
+
+È previsto di aggiungere una colonna analoga alla tabella `movies`, ma questa attività sarà affrontata insieme alla migrazione dei film dal vecchio database.
+
+Il file `assets/tv_tracker.db` risulta modificato. La modifica non è stata aggiunta allo staging Git, per evitare di includere automaticamente il database binario nel commit del codice.
+
+Prima di considerare conclusa la modifica, occorre verificare che:
+
+- La creazione del database includa la colonna `source`.
+- Le migrazioni dello schema gestiscano correttamente anche i database già esistenti.
+- Se `assets/tv_tracker.db` viene distribuito come database iniziale dell'app, anche quel file abbia lo schema aggiornato.
+
+## 5. Stato Git e GitHub
+
+Branch corrente: `main`.
+
+Sono stati messi in staging i seguenti sei file:
+
+- `src/app/details/movie/[id].tsx`
+- `src/app/details/series/[id].tsx`
+- `src/components/AddMediaButton.tsx`
+- `src/database/index.ts`
+- `src/services/tmdb.ts`
+- `src/styles/global.ts`
+
+Il riepilogo delle modifiche in staging mostrava 888 inserimenti e 323 eliminazioni.
+
+Poiché le due schermate di dettaglio presentano numerose righe modificate, è opportuno controllare il diff completo prima del commit.
+
+**Stato del commit:** non ancora confermato.  
+**Stato del push su GitHub:** non ancora confermato.
+
+## 6. Prossimi passi
+
+1. Controllare il diff completo dei sei file in staging.
+2. Verificare la gestione della colonna `source` nella creazione e nelle migrazioni del database.
+3. Decidere se aggiornare e versionare anche `assets/tv_tracker.db`, in base al suo ruolo nell'inizializzazione dell'app.
+4. Eseguire il commit del codice e il push su GitHub.
+5. Riprendere la migrazione dei film dal vecchio database.
+6. Aggiungere la colonna `source` alla tabella `movies` nel momento appropriato.
+7. Verificare il corretto funzionamento del salvataggio di film e serie e dei relativi pulsanti.
+
+---
+
+**Nota:** questo documento riassume le attività svolte e quelle ancora da completare. Per lo stato effettivo del codice e delle versioni pubblicate, fare riferimento alla cronologia Git e allo stato del repository remoto.
