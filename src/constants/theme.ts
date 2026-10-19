@@ -10,6 +10,12 @@ export const colors = {
   secondary: "#90CEA1",
 
   border: "#2A2A2A",
+
+  progressBackground: "#5a591b",
+
+  continuing: "#e4d501",
+  completed: "#72ca66",
+  terminated: "#FF6B6B",
 } as const;
 
 export const spacing = {

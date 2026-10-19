@@ -85,3 +85,131 @@ Poiché le due schermate di dettaglio presentano numerose righe modificate, è o
 ---
 
 **Nota:** questo documento riassume le attività svolte e quelle ancora da completare. Per lo stato effettivo del codice e delle versioni pubblicate, fare riferimento alla cronologia Git e allo stato del repository remoto.
+
+# TV Tracker — Riepilogo lavori del 19/10/2026
+
+## 1. Schermata di dettaglio delle serie TV
+
+File interessato: `src/app/details/series/[id].tsx`
+
+Abbiamo proseguito l'implementazione delle interazioni nella schermata di dettaglio delle serie TV, concentrandoci sulle stagioni, sugli episodi e sulla gestione delle visioni.
+
+### Struttura delle righe delle stagioni
+
+Abbiamo modificato la struttura della riga di una stagione per separare le diverse interazioni:
+
+- **Copertina, titolo e informazioni della stagione:** toccando questa parte si espande o si richiude la card, tramite `toggleSeason(season.season_number)`.
+- **Spunta:** pulsante indipendente destinato alle azioni relative alla visione della stagione.
+- **Chevron:** rimane visibile come indicatore dello stato della card, aperta o chiusa.
+
+La riga principale e la spunta sono state separate per evitare che il tocco sulla spunta attivi anche l'espansione della stagione.
+
+### Spunta delle stagioni
+
+È stato aggiunto il pulsante con le icone Ionicons:
+
+- `checkmark-circle-outline`: stagione non ancora vista interamente.
+- `checkmark-circle`: stagione vista interamente, con colore `colors.completed`.
+
+La spunta viene mostrata soltanto se la serie è stata salvata (`isSaved`).
+
+È stata inoltre introdotta la funzione `openSeasonActions(seasonNumber)`, predisposta per distinguere le stagioni non ancora viste interamente da quelle già viste.
+
+### Correzione del controllo della stagione vista
+
+È stata modificata `isSeasonWatched(seasonNumber)` per non dipendere dal caricamento preventivo degli episodi della stagione.
+
+La funzione ora confronta:
+- `episode_count` della stagione, recuperato dai dettagli della serie TMDB;
+- il numero di episodi della stagione con `is_watched === 1` in `episodeHistory`.
+
+La stagione è considerata vista quando contiene almeno un episodio e il numero di episodi visti raggiunge il totale previsto.
+
+Questa modifica permette alla spunta di risultare verde anche quando la card della stagione è chiusa.
+
+**Nota:** il controllo presuppone che gli episodi siano già presenti nel database. Dopo un aggiornamento del catalogo TMDB, il conteggio può richiedere l'aggiornamento degli episodi salvati.
+
+## 2. Spunta degli episodi
+
+È stata predisposta la struttura delle righe degli episodi per separare:
+
+- **Riga dell'episodio:** destinata ad aprire una futura schermata di dettaglio dell'episodio.
+- **Spunta:** destinata ad aprire le opzioni di visione.
+
+La spunta viene mostrata soltanto per le serie salvate e utilizza `episodeHistory` per distinguere gli episodi già visti da quelli non ancora visti.
+
+Il comportamento previsto è:
+- episodio mai visto: apertura della scelta della data della prima visione;
+- episodio già visto: apertura del menu delle azioni, con le opzioni relative alla visione e ai rewatch.
+
+La navigazione verso il dettaglio dell'episodio non è ancora implementata: il gestore della riga è attualmente un segnaposto.
+
+## 3. Barre di progresso della visione
+
+Nella schermata `src/app/details/series/[id].tsx` è stata integrata la visualizzazione del progresso di visione della serie e delle singole stagioni.
+
+### Progresso complessivo della serie
+
+È stato utilizzato il componente `SeriesProgressBar`, mostrato soltanto quando la serie è salvata nel database (`isSaved`).
+
+- Il numero di episodi visti viene calcolato da `episodeHistory`, considerando gli episodi con `is_watched === 1` ed escludendo le stagioni speciali (`season_number === 0`).
+- Il totale degli episodi viene ricavato dai conteggi delle stagioni fornite da TMDB, escludendo le stagioni speciali.
+- La barra viene alimentata tramite le proprietà `watched` e `total`.
+
+### Progresso delle singole stagioni
+
+Per ogni card di stagione è presente una barra di progresso, visibile quando la serie è salvata.
+
+- Il conteggio degli episodi visti deriva da `episodeHistory`, filtrato per stagione e per `is_watched === 1`.
+- Il totale deriva da `season.episode_count`, fornito da TMDB.
+- La percentuale viene calcolata come `watched / season.episode_count`, limitata a un massimo di `1`.
+- La barra utilizza `colors.completed` quando il progresso raggiunge il 100% e `colors.continuing` negli altri casi.
+
+### Aspetti da verificare
+
+- Verificare che i conteggi e le barre si aggiornino immediatamente dopo ogni operazione di visione o rewatch.
+- Controllare la coerenza tra gli episodi disponibili su TMDB e quelli salvati nel database, soprattutto dopo gli aggiornamenti del catalogo.
+- Mantenere separati il progresso della visione iniziale e il conteggio dei rewatch: questi ultimi non devono aumentare il numero di episodi distinti visti.
+
+## 4. Bottom sheet: stato attuale
+
+I componenti `WatchedActionSheet` e `WatchedDateSheet` erano già stati creati in precedenza, ma non sono ancora montati nella schermata di dettaglio.
+
+Di conseguenza, le funzioni che richiamano `watchedSheetRef.current?.present()` non possono ancora mostrare i menu.
+
+Sono già presenti nella schermata:
+- `watchedSheetRef`;
+- `selectedEpisode` e `selectedSeason`;
+- `watchedSheetPage`;
+- `watchedDateMode`;
+- `hasSelectedRewatch`;
+- `openWatchedSheet()`;
+- `openEpisodeActions()`;
+- `openSeasonActions()`;
+- `saveSelectedWatchDate()`.
+
+Sono inoltre importate alcune funzioni del database per registrare le visioni e i rewatch.
+
+## 5. Comportamento concordato
+
+| Elemento | Azione |
+|---|---|
+| Riga della stagione | Espande o richiude la card |
+| Spunta della stagione non completamente vista | Apre la scelta della data della visione |
+| Spunta della stagione completamente vista | Apre il menu delle azioni |
+| Riga dell'episodio | Aprirà la futura schermata di dettaglio |
+| Spunta dell'episodio mai visto | Apre la scelta della data della visione |
+| Spunta dell'episodio già visto | Apre il menu delle azioni |
+
+Una stagione è considerata vista soltanto quando **tutti gli episodi della stagione risultano visti almeno una volta**. Una stagione senza episodi non viene considerata vista.
+
+## 6. Lavori da completare nella prossima sessione
+
+1. Montare `BottomSheetModal` nella schermata di dettaglio e verificare la presenza di `BottomSheetModalProvider` nel layout dell'app.
+2. Collegare `WatchedActionSheet` e `WatchedDateSheet` alle rispettive funzioni.
+3. Completare le azioni di prima visione, annullamento della visione, rewatch e gestione dei rewatch per episodi e stagioni.
+4. Implementare la scelta della data: *Proprio ora*, *Ieri*, *Data di uscita* e *Data personalizzata*.
+5. Aggiornare `episodeHistory` dopo ogni operazione sul database, così che spunte e conteggi riflettano immediatamente lo stato aggiornato.
+6. Definire la route e realizzare la futura schermata di dettaglio degli episodi.
+
+**Stato finale della sessione:** sono state predisposte le strutture delle spunte per stagioni ed episodi e corretta la logica di visualizzazione della spunta verde delle stagioni. L'integrazione dei bottom sheet e il completamento delle azioni di visione sono rinviati alla prossima sessione.

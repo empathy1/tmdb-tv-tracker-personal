@@ -12,7 +12,7 @@ import {
   useLocalSearchParams,
   useRouter,
 } from "expo-router";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -28,10 +28,16 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { TMDBTvDetails, TMDBTvSeasonDetails } from "@/types/tmdb";
 
 import AddMediaButton from "@/components/AddMediaButton";
+import SeriesProgressBar from "@/components/SeriesProgressBar";
 import { spacing } from "@/constants/theme";
 import {
+  addEpisodeRewatch,
+  addSeasonRewatch,
+  getEpisodeRewatchCount,
   getSavedEpisodeNumbers,
   isTvSeriesSaved,
+  markEpisodeWatched,
+  markSeasonWatched,
   saveTvSeasonEpisodes,
   saveTvSeriesDetails,
 } from "@/database";
@@ -40,6 +46,14 @@ import {
   getBottomActionContainerStyle,
   globalStyles,
 } from "@/styles/global";
+import { BottomSheetModal } from "@gorhom/bottom-sheet";
+
+type SavedEpisodeProgress = {
+  season_number: number;
+  episode_number: number;
+  tmdb_id: number | null;
+  is_watched: number;
+};
 
 type SeriesDetailItem = {
   title: string;
@@ -67,6 +81,10 @@ export default function SeriesDetails() {
 
   const [isSaved, setIsSaved] = useState(false);
 
+  const [episodeHistory, setEpisodeHistory] = useState<SavedEpisodeProgress[]>(
+    [],
+  );
+
   const [seasonsToUpdate, setSeasonsToUpdate] = useState<
     {
       season_number: number;
@@ -81,6 +99,24 @@ export default function SeriesDetails() {
 
   const [loadingSeason, setLoadingSeason] = useState<number | null>(null);
 
+  const watchedSheetRef = useRef<BottomSheetModal>(null);
+
+  const [selectedEpisode, setSelectedEpisode] = useState<
+    TMDBTvSeasonDetails["episodes"][number] | null
+  >(null);
+
+  const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
+
+  const [watchedSheetPage, setWatchedSheetPage] = useState<"actions" | "date">(
+    "actions",
+  );
+
+  const [watchedDateMode, setWatchedDateMode] = useState<
+    "first_watch" | "rewatch" | null
+  >(null);
+
+  const [hasSelectedRewatch, setHasSelectedRewatch] = useState(false);
+
   useFocusEffect(
     useCallback(() => {
       let active = true;
@@ -90,6 +126,7 @@ export default function SeriesDetails() {
           setLoading(true);
           setError(null);
           setSeasonsToUpdate([]);
+          setEpisodeHistory([]);
 
           const mediaId = Number(id);
 
@@ -106,6 +143,14 @@ export default function SeriesDetails() {
           const data: TMDBTvDetails = await getTvDetails(mediaId);
 
           if (!active) return;
+
+          const savedEpisodes = alreadySaved
+            ? await getSavedEpisodeNumbers(mediaId)
+            : [];
+
+          if (!active) return;
+
+          setEpisodeHistory(savedEpisodes);
 
           setDetails({
             title: data.name,
@@ -131,8 +176,31 @@ export default function SeriesDetails() {
 
           if (!canUpdate) return;
 
-          // Legge la cronologia senza modificare il database.
-          const savedEpisodes = await getSavedEpisodeNumbers(mediaId);
+          const watchedEpisodes = savedEpisodes.filter(
+            (ep) => ep.is_watched === 1,
+          ).length;
+
+          const totalEpisodes = savedEpisodes.length;
+
+          const seasonProgress = savedEpisodes.reduce(
+            (acc, ep) => {
+              if (!acc[ep.season_number]) {
+                acc[ep.season_number] = {
+                  watched: 0,
+                  total: 0,
+                };
+              }
+
+              acc[ep.season_number].total++;
+
+              if (ep.is_watched === 1) {
+                acc[ep.season_number].watched++;
+              }
+
+              return acc;
+            },
+            {} as Record<number, { watched: number; total: number }>,
+          );
 
           if (!active) return;
 
@@ -290,6 +358,43 @@ export default function SeriesDetails() {
     }, [id]),
   );
 
+  function openWatchedSheet(page: "actions" | "date") {
+    setWatchedSheetPage(page);
+
+    requestAnimationFrame(() => {
+      watchedSheetRef.current?.present();
+    });
+  }
+
+  async function openEpisodeActions(
+    episode: TMDBTvSeasonDetails["episodes"][number],
+    seasonNumber: number,
+  ) {
+    const saved = episodeHistory.find(
+      (item) =>
+        item.season_number === seasonNumber &&
+        item.episode_number === episode.episode_number,
+    );
+
+    setSelectedEpisode(episode);
+    setSelectedSeason(seasonNumber);
+
+    if (saved?.is_watched === 1) {
+      const count = await getEpisodeRewatchCount(
+        Number(id),
+        seasonNumber,
+        episode.episode_number,
+      );
+
+      setHasSelectedRewatch(count > 0);
+      setWatchedDateMode(null);
+      openWatchedSheet("actions");
+    } else {
+      setWatchedDateMode("first_watch");
+      openWatchedSheet("date");
+    }
+  }
+
   async function toggleSeason(seasonNumber: number) {
     const isExpanded = expandedSeasons.includes(seasonNumber);
 
@@ -326,6 +431,90 @@ export default function SeriesDetails() {
     }
   }
 
+  function isSeasonWatched(seasonNumber: number): boolean {
+    const season = details?.seasons.find(
+      (item) => item.season_number === seasonNumber,
+    );
+
+    if (!season || season.episode_count <= 0) {
+      return false;
+    }
+
+    const watchedCount = episodeHistory.filter(
+      (episode) =>
+        episode.season_number === seasonNumber && episode.is_watched === 1,
+    ).length;
+
+    return watchedCount >= season.episode_count;
+  }
+
+  async function saveSelectedWatchDate(date: string) {
+    const seriesId = Number(id);
+
+    if (watchedDateMode === "first_watch") {
+      if (selectedEpisode && selectedSeason !== null) {
+        await markEpisodeWatched(
+          seriesId,
+          selectedSeason,
+          selectedEpisode.episode_number,
+          date,
+        );
+      } else if (selectedSeason !== null) {
+        await markSeasonWatched(seriesId, selectedSeason, date);
+      }
+    }
+
+    if (watchedDateMode === "rewatch") {
+      if (selectedEpisode && selectedSeason !== null) {
+        await addEpisodeRewatch(
+          seriesId,
+          selectedSeason,
+          selectedEpisode.episode_number,
+          date,
+        );
+      } else if (selectedSeason !== null) {
+        await addSeasonRewatch(seriesId, selectedSeason, date);
+      }
+    }
+
+    watchedSheetRef.current?.dismiss();
+
+    const savedEpisodes = await getSavedEpisodeNumbers(seriesId);
+    setEpisodeHistory(savedEpisodes);
+  }
+
+  async function openSeasonActions(seasonNumber: number) {
+    setSelectedEpisode(null);
+    setSelectedSeason(seasonNumber);
+    setWatchedDateMode(null);
+
+    if (!isSeasonWatched(seasonNumber)) {
+      setHasSelectedRewatch(false);
+      setWatchedDateMode("first_watch");
+      openWatchedSheet("date");
+      return;
+    }
+
+    const episodes = seasonDetails[seasonNumber]?.episodes ?? [];
+    let hasRewatch = false;
+
+    for (const episode of episodes) {
+      const count = await getEpisodeRewatchCount(
+        Number(id),
+        seasonNumber,
+        episode.episode_number,
+      );
+
+      if (count > 0) {
+        hasRewatch = true;
+        break;
+      }
+    }
+
+    setHasSelectedRewatch(hasRewatch);
+    openWatchedSheet("actions");
+  }
+
   async function handleSaveSeries() {
     if (saving) return;
 
@@ -355,6 +544,9 @@ export default function SeriesDetails() {
       }
 
       setIsSaved(true);
+
+      const savedEpisodes = await getSavedEpisodeNumbers(seriesId);
+      setEpisodeHistory(savedEpisodes);
 
       Alert.alert(
         "Salvataggio completato",
@@ -420,6 +612,17 @@ export default function SeriesDetails() {
       setSaving(false);
     }
   }
+
+  const watchedEpisodes = episodeHistory.filter(
+    (episode) => episode.season_number > 0 && episode.is_watched === 1,
+  ).length;
+
+  const totalEpisodes =
+    details?.seasons.reduce(
+      (total, season) =>
+        season.season_number > 0 ? total + season.episode_count : total,
+      0,
+    ) ?? 0;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -595,6 +798,15 @@ export default function SeriesDetails() {
               )}
             </View>
 
+            {isSaved && (
+              <View style={{ width: "100%" }}>
+                <SeriesProgressBar
+                  watched={watchedEpisodes}
+                  total={totalEpisodes}
+                />
+              </View>
+            )}
+
             <View style={{ padding: spacing.lg }}>
               {details.overview ? (
                 <>
@@ -619,10 +831,6 @@ export default function SeriesDetails() {
 
               {details && (
                 <View style={{ marginTop: spacing.xl }}>
-                  <Text style={globalStyles.sectionTitle}>
-                    Stagioni ed episodi
-                  </Text>
-
                   {details.seasons
                     .slice()
                     .sort((a, b) => a.season_number - b.season_number)
@@ -632,6 +840,11 @@ export default function SeriesDetails() {
                       );
 
                       const seasonData = seasonDetails[season.season_number];
+                      const watched = episodeHistory.filter(
+                        (episode) =>
+                          episode.season_number === season.season_number &&
+                          episode.is_watched === 1,
+                      ).length;
 
                       return (
                         <View
@@ -643,61 +856,145 @@ export default function SeriesDetails() {
                             backgroundColor: colors.surface,
                           }}
                         >
-                          <Pressable
-                            onPress={() => toggleSeason(season.season_number)}
+                          <View
                             style={{
                               flexDirection: "row",
                               alignItems: "center",
                               padding: spacing.md,
                             }}
                           >
-                            {season.poster_path ? (
-                              <Image
-                                source={{
-                                  uri: `${TMDB_IMAGE_BASE_URL}${season.poster_path}`,
-                                }}
-                                style={{
-                                  width: 56,
-                                  height: 80,
-                                  borderRadius: 6,
-                                  backgroundColor: colors.background,
-                                }}
-                                resizeMode="cover"
-                              />
-                            ) : null}
-
-                            <View
+                            <Pressable
+                              onPress={() => toggleSeason(season.season_number)}
                               style={{
                                 flex: 1,
-                                marginLeft: spacing.md,
+                                flexDirection: "row",
+                                alignItems: "center",
                               }}
                             >
-                              <Text style={globalStyles.text}>
-                                {season.name ||
-                                  (season.season_number === 0
-                                    ? "Speciali"
-                                    : `Stagione ${season.season_number}`)}
-                              </Text>
+                              {season.poster_path ? (
+                                <Image
+                                  source={{
+                                    uri: `${TMDB_IMAGE_BASE_URL}${season.poster_path}`,
+                                  }}
+                                  style={{
+                                    width: 56,
+                                    height: 80,
+                                    borderRadius: 6,
+                                    backgroundColor: colors.background,
+                                  }}
+                                  resizeMode="cover"
+                                />
+                              ) : null}
 
-                              <Text
-                                style={[
-                                  globalStyles.caption,
-                                  { marginTop: spacing.xs },
-                                ]}
+                              <View
+                                style={{
+                                  flex: 1,
+                                  marginLeft: season.poster_path
+                                    ? spacing.md
+                                    : 0,
+                                }}
                               >
-                                {season.episode_count} episodi
-                                {season.air_date
-                                  ? ` · ${season.air_date.slice(0, 4)}`
-                                  : ""}
-                              </Text>
-                            </View>
+                                <Text style={globalStyles.text}>
+                                  {season.name ||
+                                    (season.season_number === 0
+                                      ? "Speciali"
+                                      : `Stagione ${season.season_number}`)}
+                                </Text>
+
+                                <Text
+                                  style={[
+                                    globalStyles.caption,
+                                    { marginTop: spacing.xs },
+                                  ]}
+                                >
+                                  {season.episode_count} episodi
+                                  {season.air_date
+                                    ? ` · ${season.air_date.slice(0, 4)}`
+                                    : ""}
+                                </Text>
+
+                                <Text
+                                  style={[
+                                    globalStyles.caption,
+                                    { marginTop: spacing.xs },
+                                  ]}
+                                >
+                                  {watched}/{season.episode_count}
+                                </Text>
+                              </View>
+                            </Pressable>
+
+                            {isSaved && (
+                              <Pressable
+                                hitSlop={10}
+                                accessibilityRole="button"
+                                accessibilityLabel="Opzioni di visione della stagione"
+                                onPress={() =>
+                                  openSeasonActions(season.season_number)
+                                }
+                                style={{
+                                  padding: spacing.xs,
+                                  marginLeft: spacing.sm,
+                                }}
+                              >
+                                <Ionicons
+                                  name={
+                                    isSeasonWatched(season.season_number)
+                                      ? "checkmark-circle"
+                                      : "checkmark-circle-outline"
+                                  }
+                                  size={35}
+                                  color={
+                                    isSeasonWatched(season.season_number)
+                                      ? colors.completed
+                                      : colors.text
+                                  }
+                                />
+                              </Pressable>
+                            )}
 
                             <Ionicons
                               name={expanded ? "chevron-up" : "chevron-down"}
                               size={20}
                               color={colors.text}
+                              style={{ marginLeft: spacing.sm }}
                             />
-                          </Pressable>
+                          </View>
+
+                          {isSaved && (
+                            <>
+                              {(() => {
+                                const progress =
+                                  season.episode_count > 0
+                                    ? Math.min(
+                                        watched / season.episode_count,
+                                        1,
+                                      )
+                                    : 0;
+
+                                return (
+                                  <View style={{ marginTop: spacing.sm }}>
+                                    <View
+                                      style={globalStyles.progressBackground}
+                                    >
+                                      <View
+                                        style={[
+                                          globalStyles.progressBar,
+                                          {
+                                            width: `${progress * 100}%`,
+                                            backgroundColor:
+                                              progress === 1
+                                                ? colors.completed
+                                                : colors.continuing,
+                                          },
+                                        ]}
+                                      />
+                                    </View>
+                                  </View>
+                                );
+                              })()}
+                            </>
+                          )}
 
                           {expanded && (
                             <View style={{ padding: spacing.md }}>
@@ -712,54 +1009,124 @@ export default function SeriesDetails() {
                                     key={episode.id}
                                     style={{
                                       flexDirection: "row",
+                                      alignItems: "center",
                                       paddingVertical: spacing.md,
                                       borderTopWidth: 1,
                                       borderTopColor: colors.background,
                                     }}
                                   >
-                                    {episode.still_path ? (
-                                      <Image
-                                        source={{
-                                          uri: `${TMDB_IMAGE_BASE_URL}${episode.still_path}`,
-                                        }}
-                                        style={{
-                                          width: 112,
-                                          height: 64,
-                                          borderRadius: 6,
-                                          backgroundColor: colors.background,
-                                        }}
-                                        resizeMode="cover"
-                                      />
-                                    ) : null}
-
-                                    <View
+                                    <Pressable
+                                      onPress={() => {
+                                        // In seguito apriremo qui il dettaglio dell'episodio.
+                                      }}
                                       style={{
                                         flex: 1,
-                                        marginLeft: episode.still_path
-                                          ? spacing.md
-                                          : 0,
+                                        flexDirection: "row",
+                                        alignItems: "center",
                                       }}
                                     >
-                                      <Text
-                                        style={[
-                                          globalStyles.text,
-                                          { fontWeight: "600" },
-                                        ]}
-                                      >
-                                        {episode.episode_number}. {episode.name}
-                                      </Text>
+                                      {episode.still_path ? (
+                                        <Image
+                                          source={{
+                                            uri: `${TMDB_IMAGE_BASE_URL}${episode.still_path}`,
+                                          }}
+                                          style={{
+                                            width: 112,
+                                            height: 64,
+                                            borderRadius: 6,
+                                            backgroundColor: colors.background,
+                                          }}
+                                          resizeMode="cover"
+                                        />
+                                      ) : null}
 
-                                      {episode.air_date ? (
+                                      <View
+                                        style={{
+                                          flex: 1,
+                                          marginLeft: episode.still_path
+                                            ? spacing.md
+                                            : 0,
+                                        }}
+                                      >
                                         <Text
                                           style={[
-                                            globalStyles.caption,
-                                            { marginTop: spacing.xs },
+                                            globalStyles.text,
+                                            { fontWeight: "600" },
                                           ]}
                                         >
-                                          {episode.air_date}
+                                          {episode.episode_number}.{" "}
+                                          {episode.name}
                                         </Text>
-                                      ) : null}
-                                    </View>
+
+                                        {episode.air_date ? (
+                                          <Text
+                                            style={[
+                                              globalStyles.caption,
+                                              { marginTop: spacing.xs },
+                                            ]}
+                                          >
+                                            {episode.air_date}
+                                          </Text>
+                                        ) : null}
+                                      </View>
+                                    </Pressable>
+
+                                    {isSaved && (
+                                      <Pressable
+                                        hitSlop={10}
+                                        accessibilityRole="button"
+                                        accessibilityLabel={
+                                          episodeHistory.some(
+                                            (saved) =>
+                                              saved.season_number ===
+                                                season.season_number &&
+                                              saved.episode_number ===
+                                                episode.episode_number &&
+                                              saved.is_watched === 1,
+                                          )
+                                            ? "Opzioni di visione dell'episodio"
+                                            : "Segna l'episodio come visto"
+                                        }
+                                        onPress={() =>
+                                          openEpisodeActions(
+                                            episode,
+                                            season.season_number,
+                                          )
+                                        }
+                                        style={{
+                                          padding: spacing.xs,
+                                          marginLeft: spacing.sm,
+                                        }}
+                                      >
+                                        <Ionicons
+                                          name={
+                                            episodeHistory.some(
+                                              (saved) =>
+                                                saved.season_number ===
+                                                  season.season_number &&
+                                                saved.episode_number ===
+                                                  episode.episode_number &&
+                                                saved.is_watched === 1,
+                                            )
+                                              ? "checkmark-circle"
+                                              : "checkmark-circle-outline"
+                                          }
+                                          size={35}
+                                          color={
+                                            episodeHistory.some(
+                                              (saved) =>
+                                                saved.season_number ===
+                                                  season.season_number &&
+                                                saved.episode_number ===
+                                                  episode.episode_number &&
+                                                saved.is_watched === 1,
+                                            )
+                                              ? colors.completed
+                                              : colors.text
+                                          }
+                                        />
+                                      </Pressable>
+                                    )}
                                   </View>
                                 ))
                               ) : (

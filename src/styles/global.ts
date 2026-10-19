@@ -105,6 +105,19 @@ export const globalStyles = StyleSheet.create({
     textAlign: "center",
     marginTop: spacing.md,
   },
+
+  progressBackground: {
+    height: 6,
+    width: "100%",
+    borderRadius: 0,
+    backgroundColor: colors.progressBackground,
+    overflow: "hidden",
+  },
+
+  progressBar: {
+    height: "100%",
+    borderRadius: 0,
+  },
 });
 
 export function getBottomActionContainerStyle(bottomInset: number): ViewStyle {

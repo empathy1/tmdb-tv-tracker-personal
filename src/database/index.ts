@@ -186,6 +186,7 @@ export type SavedEpisodeNumber = {
   season_number: number;
   episode_number: number;
   tmdb_id: number | null;
+  is_watched: number;
 };
 
 export async function getSavedEpisodeNumbers(
@@ -197,7 +198,8 @@ export async function getSavedEpisodeNumbers(
     `SELECT
        season_number,
        episode_number,
-       tmdb_id
+       tmdb_id,
+       is_watched
      FROM episodes
      WHERE series_tmdb_id = ?`,
     seriesTmdbId,
@@ -213,4 +215,337 @@ export async function isMovieSaved(tmdbId: number): Promise<boolean> {
   );
 
   return result !== null;
+}
+
+/**
+ * Registra la prima visione di un episodio.
+ */
+export async function markEpisodeWatched(
+  seriesTmdbId: number,
+  seasonNumber: number,
+  episodeNumber: number,
+  watchedAt: string = new Date().toISOString(),
+): Promise<void> {
+  const db = await getDatabase();
+
+  await db.runAsync(
+    `UPDATE episodes
+     SET is_watched = 1,
+         watched_at = ?
+     WHERE series_tmdb_id = ?
+       AND season_number = ?
+       AND episode_number = ?`,
+    watchedAt,
+    seriesTmdbId,
+    seasonNumber,
+    episodeNumber,
+  );
+}
+
+/**
+ * Segna un episodio come non visto ed elimina i suoi rewatch.
+ */
+export async function markEpisodeUnwatched(
+  seriesTmdbId: number,
+  seasonNumber: number,
+  episodeNumber: number,
+): Promise<void> {
+  const db = await getDatabase();
+
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `UPDATE episodes
+       SET is_watched = 0,
+           watched_at = NULL
+       WHERE series_tmdb_id = ?
+         AND season_number = ?
+         AND episode_number = ?`,
+      seriesTmdbId,
+      seasonNumber,
+      episodeNumber,
+    );
+
+    await db.runAsync(
+      `DELETE FROM rewatch
+       WHERE item_type = 'episode'
+         AND series_tmdb_id = ?
+         AND season_number = ?
+         AND episode_number = ?`,
+      seriesTmdbId,
+      seasonNumber,
+      episodeNumber,
+    );
+  });
+}
+
+/**
+ * Registra la prima visione di tutti gli episodi di una stagione.
+ */
+export async function markSeasonWatched(
+  seriesTmdbId: number,
+  seasonNumber: number,
+  watchedAt: string = new Date().toISOString(),
+): Promise<void> {
+  const db = await getDatabase();
+
+  await db.runAsync(
+    `UPDATE episodes
+     SET is_watched = 1,
+         watched_at = ?
+     WHERE series_tmdb_id = ?
+       AND season_number = ?`,
+    watchedAt,
+    seriesTmdbId,
+    seasonNumber,
+  );
+}
+
+/**
+ * Segna tutti gli episodi di una stagione come non visti
+ * ed elimina i relativi rewatch.
+ */
+export async function markSeasonUnwatched(
+  seriesTmdbId: number,
+  seasonNumber: number,
+): Promise<void> {
+  const db = await getDatabase();
+
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `UPDATE episodes
+       SET is_watched = 0,
+           watched_at = NULL
+       WHERE series_tmdb_id = ?
+         AND season_number = ?`,
+      seriesTmdbId,
+      seasonNumber,
+    );
+
+    await db.runAsync(
+      `DELETE FROM rewatch
+       WHERE item_type = 'episode'
+         AND series_tmdb_id = ?
+         AND season_number = ?`,
+      seriesTmdbId,
+      seasonNumber,
+    );
+  });
+}
+
+/**
+ * Aggiunge un rewatch a un episodio già presente nel database.
+ */
+export async function addEpisodeRewatch(
+  seriesTmdbId: number,
+  seasonNumber: number,
+  episodeNumber: number,
+  watchedAt: string = new Date().toISOString(),
+): Promise<void> {
+  const db = await getDatabase();
+
+  await db.runAsync(
+    `INSERT INTO rewatch (
+       item_type,
+       episode_tmdb_id,
+       series_tmdb_id,
+       season_number,
+       episode_number,
+       movie_tmdb_id,
+       watched_at
+     )
+     SELECT
+       'episode',
+       tmdb_id,
+       series_tmdb_id,
+       season_number,
+       episode_number,
+       NULL,
+       ?
+     FROM episodes
+     WHERE series_tmdb_id = ?
+       AND season_number = ?
+       AND episode_number = ?
+       AND is_watched = 1`,
+    watchedAt,
+    seriesTmdbId,
+    seasonNumber,
+    episodeNumber,
+  );
+}
+
+/**
+ * Aggiunge un rewatch a ogni episodio già visto della stagione.
+ */
+export async function addSeasonRewatch(
+  seriesTmdbId: number,
+  seasonNumber: number,
+  watchedAt: string = new Date().toISOString(),
+): Promise<void> {
+  const db = await getDatabase();
+
+  await db.runAsync(
+    `INSERT INTO rewatch (
+       item_type,
+       episode_tmdb_id,
+       series_tmdb_id,
+       season_number,
+       episode_number,
+       movie_tmdb_id,
+       watched_at
+     )
+     SELECT
+       'episode',
+       tmdb_id,
+       series_tmdb_id,
+       season_number,
+       episode_number,
+       NULL,
+       ?
+     FROM episodes
+     WHERE series_tmdb_id = ?
+       AND season_number = ?
+       AND is_watched = 1`,
+    watchedAt,
+    seriesTmdbId,
+    seasonNumber,
+  );
+}
+
+/**
+ * Elimina tutti i rewatch di un episodio.
+ * La prima visione rimane invariata.
+ */
+export async function clearEpisodeRewatches(
+  seriesTmdbId: number,
+  seasonNumber: number,
+  episodeNumber: number,
+): Promise<void> {
+  const db = await getDatabase();
+
+  await db.runAsync(
+    `DELETE FROM rewatch
+     WHERE item_type = 'episode'
+       AND series_tmdb_id = ?
+       AND season_number = ?
+       AND episode_number = ?`,
+    seriesTmdbId,
+    seasonNumber,
+    episodeNumber,
+  );
+}
+
+/**
+ * Elimina tutti i rewatch degli episodi di una stagione.
+ */
+export async function clearSeasonRewatches(
+  seriesTmdbId: number,
+  seasonNumber: number,
+): Promise<void> {
+  const db = await getDatabase();
+
+  await db.runAsync(
+    `DELETE FROM rewatch
+     WHERE item_type = 'episode'
+       AND series_tmdb_id = ?
+       AND season_number = ?`,
+    seriesTmdbId,
+    seasonNumber,
+  );
+}
+
+/**
+ * Elimina il rewatch più recente di un episodio.
+ */
+export async function removeLastEpisodeRewatch(
+  seriesTmdbId: number,
+  seasonNumber: number,
+  episodeNumber: number,
+): Promise<void> {
+  const db = await getDatabase();
+
+  await db.runAsync(
+    `DELETE FROM rewatch
+     WHERE id = (
+       SELECT id
+       FROM rewatch
+       WHERE item_type = 'episode'
+         AND series_tmdb_id = ?
+         AND season_number = ?
+         AND episode_number = ?
+       ORDER BY watched_at DESC, id DESC
+       LIMIT 1
+     )`,
+    seriesTmdbId,
+    seasonNumber,
+    episodeNumber,
+  );
+}
+
+/**
+ * Elimina il rewatch più recente di ogni episodio della stagione
+ * che possiede almeno un rewatch.
+ */
+export async function removeLastSeasonRewatch(
+  seriesTmdbId: number,
+  seasonNumber: number,
+): Promise<void> {
+  const db = await getDatabase();
+
+  await db.withTransactionAsync(async () => {
+    const episodes = await db.getAllAsync<{
+      episode_number: number;
+    }>(
+      `SELECT DISTINCT episode_number
+       FROM rewatch
+       WHERE item_type = 'episode'
+         AND series_tmdb_id = ?
+         AND season_number = ?`,
+      seriesTmdbId,
+      seasonNumber,
+    );
+
+    for (const episode of episodes) {
+      await db.runAsync(
+        `DELETE FROM rewatch
+         WHERE id = (
+           SELECT id
+           FROM rewatch
+           WHERE item_type = 'episode'
+             AND series_tmdb_id = ?
+             AND season_number = ?
+             AND episode_number = ?
+           ORDER BY watched_at DESC, id DESC
+           LIMIT 1
+         )`,
+        seriesTmdbId,
+        seasonNumber,
+        episode.episode_number,
+      );
+    }
+  });
+}
+
+/**
+ * Restituisce il numero di rewatch di un episodio.
+ */
+export async function getEpisodeRewatchCount(
+  seriesTmdbId: number,
+  seasonNumber: number,
+  episodeNumber: number,
+): Promise<number> {
+  const db = await getDatabase();
+
+  const result = await db.getFirstAsync<{ count: number }>(
+    `SELECT COUNT(*) AS count
+     FROM rewatch
+     WHERE item_type = 'episode'
+       AND series_tmdb_id = ?
+       AND season_number = ?
+       AND episode_number = ?`,
+    seriesTmdbId,
+    seasonNumber,
+    episodeNumber,
+  );
+
+  return result?.count ?? 0;
 }
