@@ -213,3 +213,57 @@ Una stagione è considerata vista soltanto quando **tutti gli episodi della stag
 6. Definire la route e realizzare la futura schermata di dettaglio degli episodi.
 
 **Stato finale della sessione:** sono state predisposte le strutture delle spunte per stagioni ed episodi e corretta la logica di visualizzazione della spunta verde delle stagioni. L'integrazione dei bottom sheet e il completamento delle azioni di visione sono rinviati alla prossima sessione.
+
+# Riepilogo lavori – 20 ottobre 2026
+
+## 1. Gestione delle visualizzazioni e dei rewatch
+
+Abbiamo lavorato sulla schermata dei dettagli delle serie TV (`src/app/details/series/[id].tsx`), perfezionando la gestione delle visualizzazioni degli episodi e delle stagioni.
+
+### Foglio delle azioni degli episodi
+- Gestione delle azioni disponibili per gli episodi già contrassegnati come visti.
+- Apertura del foglio delle azioni in base allo stato dell'episodio e alla presenza di rewatch.
+- Gestione delle conferme prima di annullare una visualizzazione o modificare la cronologia dei rewatch.
+- Gestione delle date associate alle visualizzazioni.
+
+### Gestione dei rewatch
+- Conferma prima di eliminare tutti i rewatch, mantenendo la prima visualizzazione.
+- Conferma prima di rimuovere l'ultimo rewatch, sia per un singolo episodio sia per una stagione.
+- Distinzione tra prima visualizzazione e visualizzazioni successive.
+
+## 2. Indicatori visivi degli episodi e delle stagioni
+
+Abbiamo perfezionato gli indicatori che mostrano lo stato di visualizzazione nella schermata dei dettagli della serie.
+
+### Episodi
+L'indicatore distingue tre situazioni:
+- Episodio non visto: cerchio contornato.
+- Episodio visto una volta: cerchio verde con spunta.
+- Episodio visto almeno due volte: cerchio verde pieno senza spunta, con il numero di visualizzazioni sovrapposto (`×2`, `×3` e così via).
+
+Il numero di visualizzazioni viene calcolato per il singolo episodio, sommando la prima visione ai rewatch registrati.
+
+### Stagioni
+Abbiamo applicato la stessa logica visiva agli indicatori delle stagioni:
+- Stagione non completata: cerchio contornato.
+- Stagione completata una volta: cerchio verde con spunta.
+- Stagione completata più volte: cerchio verde pieno senza spunta, con il numero di visioni complete sovrapposto.
+
+Il conteggio delle visioni complete della stagione deve tenere conto degli episodi della stagione: una visione completa viene conteggiata soltanto quando tutti gli episodi previsti risultano visti almeno altrettante volte.
+
+### Correzione del rendering delle icone
+
+Abbiamo risolto un problema nel rendering degli indicatori dei rewatch delle stagioni. In precedenza, quando erano presenti più visualizzazioni, veniva mostrato un cerchio creato con un componente `View`, senza utilizzare l'icona di Ionicons.
+
+La soluzione finale mantiene sempre un'icona `Ionicons` all'interno di un contenitore di dimensioni fisse `35 × 35`:
+- `checkmark-circle-outline` per le stagioni non completate;
+- `checkmark-circle` per le stagioni completate una volta;
+- `ellipse` per le stagioni con almeno due visioni complete.
+
+Quando `totalWatches >= 2`, il testo con il conteggio viene sovrapposto all'icona tramite un `View` posizionato in modo assoluto. In questo modo il numero appare al centro del cerchio e la spunta non è più visibile.
+
+## 3. Stato finale
+
+Gli indicatori degli episodi e delle stagioni utilizzano ora lo stesso principio grafico: cerchio contornato, cerchio con spunta oppure cerchio pieno con conteggio dei rewatch. Le dimensioni degli indicatori rimangono uniformi.
+
+Il lavoro si è concentrato sulla schermata dei dettagli delle serie TV e sulla rappresentazione visiva della cronologia delle visualizzazioni, senza introdurre modifiche strutturali al database in questa sessione.

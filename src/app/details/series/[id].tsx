@@ -6,13 +6,14 @@ import {
 } from "@/services/tmdb";
 
 import { Ionicons } from "@expo/vector-icons";
+import { DateTimePickerAndroid } from "@react-native-community/datetimepicker";
 import {
   Stack,
   useFocusEffect,
   useLocalSearchParams,
   useRouter,
 } from "expo-router";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -28,16 +29,24 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { TMDBTvDetails, TMDBTvSeasonDetails } from "@/types/tmdb";
 
 import AddMediaButton from "@/components/AddMediaButton";
+import WatchedActionSheet from "@/components/bottomSheets/WatchedActionSheet";
+import WatchedDateSheet from "@/components/bottomSheets/WatchedDateSheet";
 import SeriesProgressBar from "@/components/SeriesProgressBar";
 import { spacing } from "@/constants/theme";
 import {
   addEpisodeRewatch,
   addSeasonRewatch,
+  clearEpisodeRewatches,
+  clearSeasonRewatches,
   getEpisodeRewatchCount,
   getSavedEpisodeNumbers,
   isTvSeriesSaved,
+  markEpisodeUnwatched,
   markEpisodeWatched,
+  markSeasonUnwatched,
   markSeasonWatched,
+  removeLastEpisodeRewatch,
+  removeLastSeasonRewatch,
   saveTvSeasonEpisodes,
   saveTvSeriesDetails,
 } from "@/database";
@@ -85,6 +94,10 @@ export default function SeriesDetails() {
     [],
   );
 
+  const [episodeRewatchCounts, setEpisodeRewatchCounts] = useState<
+    Record<string, number>
+  >({});
+
   const [seasonsToUpdate, setSeasonsToUpdate] = useState<
     {
       season_number: number;
@@ -116,6 +129,35 @@ export default function SeriesDetails() {
   >(null);
 
   const [hasSelectedRewatch, setHasSelectedRewatch] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadRewatchCounts() {
+      const counts: Record<string, number> = {};
+
+      for (const episode of episodeHistory) {
+        if (episode.is_watched !== 1) continue;
+
+        counts[getEpisodeKey(episode.season_number, episode.episode_number)] =
+          await getEpisodeRewatchCount(
+            Number(id),
+            episode.season_number,
+            episode.episode_number,
+          );
+      }
+
+      if (!cancelled) {
+        setEpisodeRewatchCounts(counts);
+      }
+    }
+
+    void loadRewatchCounts();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [episodeHistory, id]);
 
   useFocusEffect(
     useCallback(() => {
@@ -481,6 +523,226 @@ export default function SeriesDetails() {
 
     const savedEpisodes = await getSavedEpisodeNumbers(seriesId);
     setEpisodeHistory(savedEpisodes);
+  }
+
+  function getEpisodeKey(seasonNumber: number, episodeNumber: number) {
+    return `${seasonNumber}-${episodeNumber}`;
+  }
+
+  function getSeasonTotalWatches(
+    seasonNumber: number,
+    totalEpisodes: number,
+  ): number {
+    if (totalEpisodes <= 0) return 0;
+
+    const watchedEpisodesInSeason = episodeHistory.filter(
+      (episode) =>
+        episode.season_number === seasonNumber && episode.is_watched === 1,
+    );
+
+    // Il moltiplicatore compare solo se tutti gli episodi sono stati visti.
+    if (watchedEpisodesInSeason.length < totalEpisodes) {
+      return 0;
+    }
+
+    const watchCounts = watchedEpisodesInSeason.map((episode) => {
+      const rewatchCount =
+        episodeRewatchCounts[
+          getEpisodeKey(seasonNumber, episode.episode_number)
+        ] ?? 0;
+
+      return 1 + rewatchCount;
+    });
+
+    return Math.min(...watchCounts);
+  }
+
+  function handleWatchNow() {
+    void saveSelectedWatchDate(new Date().toISOString());
+  }
+
+  function handleWatchYesterday() {
+    const date = new Date();
+    date.setDate(date.getDate() - 1);
+    void saveSelectedWatchDate(date.toISOString());
+  }
+
+  function getSelectedReleaseDate(): string | null {
+    if (selectedEpisode?.air_date) {
+      return selectedEpisode.air_date;
+    }
+
+    if (selectedSeason !== null) {
+      return (
+        details?.seasons.find(
+          (season) => season.season_number === selectedSeason,
+        )?.air_date ?? null
+      );
+    }
+
+    return null;
+  }
+
+  function handleWatchOnReleaseDate() {
+    const releaseDate = getSelectedReleaseDate();
+
+    if (releaseDate) {
+      void saveSelectedWatchDate(releaseDate);
+    }
+  }
+
+  function handleCustomWatchDate() {
+    DateTimePickerAndroid.open({
+      value: new Date(),
+      mode: "date",
+      maximumDate: new Date(),
+      onChange: (event, selectedDate) => {
+        if (event.type === "set" && selectedDate) {
+          void saveSelectedWatchDate(selectedDate.toISOString());
+        }
+      },
+    });
+  }
+
+  async function refreshEpisodeHistory() {
+    const savedEpisodes = await getSavedEpisodeNumbers(Number(id));
+    setEpisodeHistory(savedEpisodes);
+  }
+
+  async function runWatchedAction(action: () => Promise<void>) {
+    try {
+      await action();
+      await refreshEpisodeHistory();
+      watchedSheetRef.current?.dismiss();
+    } catch (error) {
+      console.error("Errore aggiornando lo storico delle visioni:", error);
+      Alert.alert(
+        "Errore",
+        "Non è stato possibile aggiornare lo storico delle visioni.",
+      );
+    }
+  }
+
+  function handleUnwatch() {
+    if (selectedSeason === null) return;
+
+    Alert.alert(
+      "Confermare?",
+      selectedEpisode
+        ? "Vuoi segnare questo episodio come non visto? Verranno eliminati anche i suoi rewatch."
+        : "Vuoi segnare tutti gli episodi di questa stagione come non visti? Verranno eliminati anche i loro rewatch.",
+      [
+        {
+          text: "Annulla",
+          style: "cancel",
+        },
+        {
+          text: "Non visto",
+          style: "destructive",
+          onPress: () => {
+            const seriesId = Number(id);
+            const seasonNumber = selectedSeason;
+            const episode = selectedEpisode;
+
+            void runWatchedAction(async () => {
+              if (episode) {
+                await markEpisodeUnwatched(
+                  seriesId,
+                  seasonNumber,
+                  episode.episode_number,
+                );
+              } else {
+                await markSeasonUnwatched(seriesId, seasonNumber);
+              }
+            });
+          },
+        },
+      ],
+      { cancelable: true },
+    );
+  }
+
+  function handleRewatch() {
+    setWatchedDateMode("rewatch");
+    setWatchedSheetPage("date");
+  }
+
+  function handleResetRewatch() {
+    if (selectedSeason === null) return;
+
+    Alert.alert(
+      "Confermare?",
+      selectedEpisode
+        ? "Vuoi eliminare tutti i rewatch di questo episodio e conservarne soltanto la prima visione?"
+        : "Vuoi eliminare tutti i rewatch degli episodi di questa stagione, conservando le prime visioni?",
+      [
+        {
+          text: "Annulla",
+          style: "cancel",
+        },
+        {
+          text: "Visto una volta",
+          style: "destructive",
+          onPress: () => {
+            const seriesId = Number(id);
+            const seasonNumber = selectedSeason;
+            const episode = selectedEpisode;
+
+            void runWatchedAction(async () => {
+              if (episode) {
+                await clearEpisodeRewatches(
+                  seriesId,
+                  seasonNumber,
+                  episode.episode_number,
+                );
+              } else {
+                await clearSeasonRewatches(seriesId, seasonNumber);
+              }
+            });
+          },
+        },
+      ],
+      { cancelable: true },
+    );
+  }
+
+  function handleRemoveLastRewatch() {
+    if (selectedSeason === null) return;
+
+    Alert.alert(
+      "Confermare?",
+      selectedEpisode
+        ? "Vuoi eliminare l'ultimo rewatch di questo episodio?"
+        : "Vuoi eliminare l'ultimo rewatch registrato per ogni episodio della stagione che ne ha almeno uno?",
+      [
+        {
+          text: "Annulla",
+          style: "cancel",
+        },
+        {
+          text: "Elimina",
+          style: "destructive",
+          onPress: () => {
+            const seriesId = Number(id);
+            const seasonNumber = selectedSeason;
+            const episode = selectedEpisode;
+
+            void runWatchedAction(async () => {
+              if (episode) {
+                await removeLastEpisodeRewatch(
+                  seriesId,
+                  seasonNumber,
+                  episode.episode_number,
+                );
+              } else {
+                await removeLastSeasonRewatch(seriesId, seasonNumber);
+              }
+            });
+          },
+        },
+      ],
+      { cancelable: true },
+    );
   }
 
   async function openSeasonActions(seasonNumber: number) {
@@ -937,19 +1199,73 @@ export default function SeriesDetails() {
                                   marginLeft: spacing.sm,
                                 }}
                               >
-                                <Ionicons
-                                  name={
-                                    isSeasonWatched(season.season_number)
-                                      ? "checkmark-circle"
-                                      : "checkmark-circle-outline"
-                                  }
-                                  size={35}
-                                  color={
-                                    isSeasonWatched(season.season_number)
-                                      ? colors.completed
-                                      : colors.text
-                                  }
-                                />
+                                {(() => {
+                                  const totalWatches = getSeasonTotalWatches(
+                                    season.season_number,
+                                    season.episode_count,
+                                  );
+
+                                  const allEpisodesWatched =
+                                    season.episode_count > 0 &&
+                                    watched >= season.episode_count;
+
+                                  return (
+                                    <View
+                                      style={{
+                                        width: 35,
+                                        height: 35,
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        flexShrink: 0,
+                                      }}
+                                    >
+                                      <Ionicons
+                                        name={
+                                          totalWatches >= 2
+                                            ? "ellipse"
+                                            : allEpisodesWatched
+                                              ? "checkmark-circle"
+                                              : "checkmark-circle-outline"
+                                        }
+                                        size={35}
+                                        color={
+                                          totalWatches >= 2 ||
+                                          allEpisodesWatched
+                                            ? colors.completed
+                                            : colors.text
+                                        }
+                                      />
+
+                                      {totalWatches >= 2 && (
+                                        <View
+                                          style={{
+                                            position: "absolute",
+                                            top: 0,
+                                            left: 0,
+                                            right: 0,
+                                            bottom: 0,
+                                            alignItems: "center",
+                                            justifyContent: "center",
+                                          }}
+                                        >
+                                          <Text
+                                            numberOfLines={1}
+                                            adjustsFontSizeToFit
+                                            style={{
+                                              color: "#000000",
+                                              fontSize: 15,
+                                              fontWeight: "700",
+                                              includeFontPadding: false,
+                                              textAlign: "center",
+                                            }}
+                                          >
+                                            ×{totalWatches}
+                                          </Text>
+                                        </View>
+                                      )}
+                                    </View>
+                                  );
+                                })()}
                               </Pressable>
                             )}
 
@@ -1098,33 +1414,85 @@ export default function SeriesDetails() {
                                           marginLeft: spacing.sm,
                                         }}
                                       >
-                                        <Ionicons
-                                          name={
-                                            episodeHistory.some(
-                                              (saved) =>
-                                                saved.season_number ===
-                                                  season.season_number &&
-                                                saved.episode_number ===
-                                                  episode.episode_number &&
-                                                saved.is_watched === 1,
-                                            )
-                                              ? "checkmark-circle"
-                                              : "checkmark-circle-outline"
-                                          }
-                                          size={35}
-                                          color={
-                                            episodeHistory.some(
-                                              (saved) =>
-                                                saved.season_number ===
-                                                  season.season_number &&
-                                                saved.episode_number ===
-                                                  episode.episode_number &&
-                                                saved.is_watched === 1,
-                                            )
-                                              ? colors.completed
-                                              : colors.text
-                                          }
-                                        />
+                                        {(() => {
+                                          const saved = episodeHistory.find(
+                                            (item) =>
+                                              item.season_number ===
+                                                season.season_number &&
+                                              item.episode_number ===
+                                                episode.episode_number,
+                                          );
+
+                                          const watched =
+                                            saved?.is_watched === 1;
+
+                                          const rewatchCount =
+                                            episodeRewatchCounts[
+                                              getEpisodeKey(
+                                                season.season_number,
+                                                episode.episode_number,
+                                              )
+                                            ] ?? 0;
+
+                                          const totalWatches = watched
+                                            ? 1 + rewatchCount
+                                            : 0;
+
+                                          return (
+                                            <View
+                                              style={{
+                                                width: 35,
+                                                height: 35,
+                                                alignItems: "center",
+                                                justifyContent: "center",
+                                              }}
+                                            >
+                                              <Ionicons
+                                                name={
+                                                  totalWatches >= 2
+                                                    ? "ellipse"
+                                                    : watched
+                                                      ? "checkmark-circle"
+                                                      : "checkmark-circle-outline"
+                                                }
+                                                size={35}
+                                                color={
+                                                  watched
+                                                    ? colors.completed
+                                                    : colors.text
+                                                }
+                                              />
+
+                                              {totalWatches >= 2 && (
+                                                <View
+                                                  style={{
+                                                    position: "absolute",
+                                                    top: 0,
+                                                    left: 0,
+                                                    right: 0,
+                                                    bottom: 0,
+                                                    alignItems: "center",
+                                                    justifyContent: "center",
+                                                  }}
+                                                >
+                                                  <Text
+                                                    numberOfLines={1}
+                                                    adjustsFontSizeToFit
+                                                    style={{
+                                                      color: "#000000",
+                                                      fontSize: 15,
+                                                      fontWeight: "700",
+                                                      includeFontPadding: false,
+                                                      textAlign: "center",
+                                                    }}
+                                                  >
+                                                    ×{totalWatches}
+                                                  </Text>
+                                                </View>
+                                              )}
+                                            </View>
+                                          );
+                                        })()}
                                       </Pressable>
                                     )}
                                   </View>
@@ -1167,6 +1535,33 @@ export default function SeriesDetails() {
           ) : null}
         </>
       )}
+
+      <BottomSheetModal
+        ref={watchedSheetRef}
+        index={0}
+        snapPoints={watchedSheetPage === "actions" ? ["35%"] : ["45%"]}
+        enablePanDownToClose
+        backgroundStyle={{ backgroundColor: colors.surface }}
+        handleIndicatorStyle={{ backgroundColor: colors.text }}
+      >
+        {watchedSheetPage === "actions" ? (
+          <WatchedActionSheet
+            onUnwatch={handleUnwatch}
+            onRewatch={handleRewatch}
+            onResetRewatch={handleResetRewatch}
+            hasRewatch={hasSelectedRewatch}
+            onRemoveLastRewatch={handleRemoveLastRewatch}
+          />
+        ) : (
+          <WatchedDateSheet
+            onNow={handleWatchNow}
+            onYesterday={handleWatchYesterday}
+            onReleaseDate={handleWatchOnReleaseDate}
+            onCustomDate={handleCustomWatchDate}
+            hasReleaseDate={Boolean(getSelectedReleaseDate())}
+          />
+        )}
+      </BottomSheetModal>
     </View>
   );
 }
