@@ -1,13 +1,14 @@
-import { colors, spacing } from "@/constants/theme";
+import { spacing } from "@/constants/theme";
 import { globalStyles } from "@/styles/global";
 import { Text, View } from "react-native";
 
 type Props = {
   watched: number;
   total: number;
+  color: string;
 };
 
-export default function SeriesProgressBar({ watched, total }: Props) {
+export default function SeriesProgressBar({ watched, total, color }: Props) {
   const progress = total === 0 ? 0 : (watched / total) * 100;
 
   return (
@@ -18,8 +19,7 @@ export default function SeriesProgressBar({ watched, total }: Props) {
             globalStyles.progressBar,
             {
               width: `${progress}%`,
-              backgroundColor:
-                watched === total ? colors.completed : colors.continuing,
+              backgroundColor: color,
             },
           ]}
         />

@@ -40,6 +40,7 @@ import {
   clearSeasonRewatches,
   getEpisodeRewatchCount,
   getSavedEpisodeNumbers,
+  getTvSeriesWatchStatus,
   isTvSeriesSaved,
   markEpisodeUnwatched,
   markEpisodeWatched,
@@ -55,7 +56,11 @@ import {
   getBottomActionContainerStyle,
   globalStyles,
 } from "@/styles/global";
-import { BottomSheetModal } from "@gorhom/bottom-sheet";
+import {
+  BottomSheetBackdrop,
+  BottomSheetBackdropProps,
+  BottomSheetModal,
+} from "@gorhom/bottom-sheet";
 
 type SavedEpisodeProgress = {
   season_number: number;
@@ -89,6 +94,7 @@ export default function SeriesDetails() {
   const [expandedSeasons, setExpandedSeasons] = useState<number[]>([]);
 
   const [isSaved, setIsSaved] = useState(false);
+  const [watchStatus, setWatchStatus] = useState<string | null>(null);
 
   const [episodeHistory, setEpisodeHistory] = useState<SavedEpisodeProgress[]>(
     [],
@@ -177,6 +183,11 @@ export default function SeriesDetails() {
           }
 
           const alreadySaved = await isTvSeriesSaved(mediaId);
+          const savedWatchStatus = alreadySaved
+            ? await getTvSeriesWatchStatus(mediaId)
+            : null;
+
+          setWatchStatus(savedWatchStatus);
 
           if (!active) return;
 
@@ -886,6 +897,34 @@ export default function SeriesDetails() {
       0,
     ) ?? 0;
 
+  const renderWatchedBackdrop = useCallback(
+    (props: BottomSheetBackdropProps) => (
+      <BottomSheetBackdrop
+        {...props}
+        appearsOnIndex={0}
+        disappearsOnIndex={-1}
+        pressBehavior="close"
+      />
+    ),
+    [],
+  );
+
+  const seriesProgressColor =
+    details?.status === "Returning Series"
+      ? colors.completed
+      : details?.status === "Ended" || details?.status === "Canceled"
+        ? colors.ended
+        : null;
+
+  const progressBarColor =
+    watchStatus === "continuing"
+      ? colors.continuing
+      : watchStatus === "stopped"
+        ? colors.stopped
+        : watchStatus === "up_to_date"
+          ? (seriesProgressColor ?? colors.completed)
+          : colors.progressBackground;
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <Stack.Screen options={{ headerShown: false }} />
@@ -1060,11 +1099,12 @@ export default function SeriesDetails() {
               )}
             </View>
 
-            {isSaved && (
+            {isSaved && progressBarColor !== null && (
               <View style={{ width: "100%" }}>
                 <SeriesProgressBar
                   watched={watchedEpisodes}
                   total={totalEpisodes}
+                  color={progressBarColor}
                 />
               </View>
             )}
@@ -1541,6 +1581,7 @@ export default function SeriesDetails() {
         index={0}
         snapPoints={watchedSheetPage === "actions" ? ["35%"] : ["45%"]}
         enablePanDownToClose
+        backdropComponent={renderWatchedBackdrop}
         backgroundStyle={{ backgroundColor: colors.surface }}
         handleIndicatorStyle={{ backgroundColor: colors.text }}
       >

@@ -15,7 +15,8 @@ export const colors = {
 
   continuing: "#e4d501",
   completed: "#72ca66",
-  terminated: "#FF6B6B",
+  stopped: "#c43434",
+  ended: "#a14ae7",
 } as const;
 
 export const spacing = {

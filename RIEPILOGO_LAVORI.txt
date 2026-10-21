@@ -267,3 +267,252 @@ Quando `totalWatches >= 2`, il testo con il conteggio viene sovrapposto all'icon
 Gli indicatori degli episodi e delle stagioni utilizzano ora lo stesso principio grafico: cerchio contornato, cerchio con spunta oppure cerchio pieno con conteggio dei rewatch. Le dimensioni degli indicatori rimangono uniformi.
 
 Il lavoro si è concentrato sulla schermata dei dettagli delle serie TV e sulla rappresentazione visiva della cronologia delle visualizzazioni, senza introdurre modifiche strutturali al database in questa sessione.
+
+# Riepilogo lavori – 21 ottobre 2026
+## Progetto TV Tracker
+
+### 1. Barra di progresso generale delle serie TV
+
+**Obiettivo**
+
+Modificare il colore della barra di progresso generale nella pagina di dettaglio di una serie, utilizzando sia lo stato personale di visione memorizzato nel database sia lo stato ufficiale della serie restituito da TMDB.
+
+Le barre di progresso delle singole stagioni devono rimanere invariate.
+
+**Stati TMDB individuati**
+
+La pagina `src/app/details/series/[id].tsx` recupera lo stato TMDB dalla proprietà `details.status`, assegnata durante il caricamento dei dettagli:
+
+```tsx
+setDetails({
+  title: data.name,
+  backdrop: data.backdrop_path,
+  overview: data.overview,
+  date: data.first_air_date,
+  status: data.status,
+  rating: data.vote_average,
+  genres: data.genres.map((genre) => genre.name),
+  extraInfo: `${data.number_of_seasons} stagioni · ${data.number_of_episodes} episodi`,
+  seasons: data.seasons ?? [],
+});
+```
+
+Gli stati TMDB considerati per la barra generale sono:
+
+- `Returning Series`: verde, `colors.completed`.
+- `Ended`: viola, `colors.ended`.
+- `Canceled`: viola, `colors.ended`.
+- Altri stati TMDB: nessun colore derivato dallo stato TMDB.
+
+**Stati personali e colori desiderati**
+
+Il campo `watch_status` della tabella `series` rappresenta lo stato personale di visione, distinto dallo stato ufficiale TMDB.
+
+| `watch_status` | Condizione TMDB | Colore della barra generale |
+|---|---|---|
+| `continuing` | Qualsiasi | Giallo, `colors.continuing` |
+| `stopped` | Qualsiasi | Rosso, `colors.stopped` |
+| `up_to_date` | `Returning Series` | Verde, `colors.completed` |
+| `up_to_date` | `Ended` o `Canceled` | Viola, `colors.ended` |
+| Qualsiasi altro caso | Qualsiasi | Barra nascosta |
+
+La barra deve essere visualizzata soltanto quando la serie è salvata e la combinazione degli stati produce un colore valido.
+
+### 2. Database: recupero dello stato personale
+
+Nel file del database è presente la funzione:
+
+```tsx
+export async function saveTvSeriesDetails(
+  details: TMDBTvDetails,
+  externalIds: {
+    tvdb_id: number | null;
+    imdb_id: string | null;
+  },
+): Promise<void> {
+  const db = await getDatabase();
+
+  await db.runAsync(
+    `INSERT INTO series (
+      tmdb_id,
+      tvdb_id,
+      imdb_id,
+      title,
+      poster_path,
+      status,
+      backdrop_path,
+      overview,
+      first_air_date,
+      watch_status
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(tmdb_id) DO NOTHING`,
+    details.id,
+    externalIds.tvdb_id,
+    externalIds.imdb_id,
+    details.name,
+    details.poster_path,
+    details.status,
+    details.backdrop_path,
+    details.overview,
+    details.first_air_date || null,
+    "not_started_yet",
+  );
+}
+```
+
+La funzione salva lo stato TMDB nella colonna `status` e inizializza lo stato personale `watch_status` a `not_started_yet` per le nuove serie.
+
+`ON CONFLICT(tmdb_id) DO NOTHING` impedisce di sovrascrivere i dati di una serie già presente, compreso il suo stato personale.
+
+Per recuperare lo stato personale è stata aggiunta alla lista delle modifiche da integrare la funzione seguente, da inserire dopo `isTvSeriesSaved` nel file del database:
+
+```tsx
+export async function getTvSeriesWatchStatus(
+  tmdbId: number,
+): Promise<string | null> {
+  const db = await getDatabase();
+
+  const result = await db.getFirstAsync<{
+    watch_status: string | null;
+  }>(
+    "SELECT watch_status FROM series WHERE tmdb_id = ? LIMIT 1",
+    tmdbId,
+  );
+
+  return result?.watch_status ?? null;
+}
+```
+
+La funzione esegue una lettura del campo `watch_status` in base al `tmdb_id`. La sua integrazione effettiva nel file e il corretto funzionamento devono ancora essere verificati.
+
+### 3. Integrazione nella pagina di dettaglio
+
+File interessato:
+
+`src/app/details/series/[id].tsx`
+
+La pagina possiede già lo stato React:
+
+```tsx
+const [details, setDetails] = useState<SeriesDetailItem | null>(null);
+const [isSaved, setIsSaved] = useState(false);
+```
+
+È stato proposto di aggiungere anche:
+
+```tsx
+const [watchStatus, setWatchStatus] = useState<string | null>(null);
+```
+
+L'import della funzione `getTvSeriesWatchStatus` deve essere aggiunto all'import esistente dal modulo del database.
+
+Nella funzione `loadDetails()`, dopo aver verificato se la serie è salvata, il recupero dello stato personale deve avvenire in questo modo:
+
+```tsx
+const savedWatchStatus = alreadySaved
+  ? await getTvSeriesWatchStatus(mediaId)
+  : null;
+
+setWatchStatus(savedWatchStatus);
+```
+
+Questo codice presuppone che `alreadySaved` e `mediaId` siano già definiti nella funzione di caricamento, come nel flusso esistente.
+
+**Attenzione:** l'integrazione completa in `loadDetails()` non è stata verificata sul file aggiornato. Prima di considerare conclusa la modifica bisogna controllare che il caricamento, gli import e lo stato React siano collegati correttamente.
+
+### 4. Costanti per il colore
+
+È stata individuata questa logica per lo stato TMDB:
+
+```tsx
+const seriesProgressColor =
+  details?.status === "Returning Series"
+    ? colors.completed
+    : details?.status === "Ended" ||
+        details?.status === "Canceled"
+      ? colors.ended
+      : null;
+```
+
+L'uso di `details?.status` evita l'errore TypeScript secondo cui `details` potrebbe essere `null`.
+
+La logica prevista per il colore finale è:
+
+```tsx
+  const progressBarColor =
+    watchStatus === "continuing"
+      ? colors.continuing
+      : watchStatus === "stopped"
+        ? colors.stopped
+        : watchStatus === "up_to_date"
+          ? (seriesProgressColor ?? colors.completed)
+          : colors.progressBackground;
+```
+
+La costante `progressBarColor` restituisce quindi `null` quando lo stato personale non è tra quelli previsti.
+Quando `up_to_date` non può essere associato a uno stato TMDB riconosciuto il colore impostato è il verde.
+
+### 5. Componente SeriesProgressBar
+
+File interessato:
+
+`SeriesProgressBar.tsx`
+
+Il componente deve ricevere il colore dall'esterno, invece di determinarlo autonomamente in base al numero di episodi visti.
+
+La prop prevista è:
+
+```tsx
+type Props = {
+  watched: number;
+  total: number;
+  color: string;
+};
+```
+
+All'interno del componente, il colore della barra deve essere impostato con:
+
+```tsx
+backgroundColor: color
+```
+
+Questo sostituisce la precedente scelta automatica tra `colors.completed` e `colors.continuing`, lasciando invariati il calcolo della percentuale e il testo con il numero di episodi visti.
+
+La modifica della prop `color` è stata proposta, ma va verificato che sia effettivamente presente nel file corrente.
+
+### 6. Rendering della barra generale
+
+La condizione prevista nella pagina di dettaglio è:
+
+```tsx
+{isSaved && progressBarColor !== null && (
+  <View style={{ width: "100%" }}>
+    <SeriesProgressBar
+      watched={watchedEpisodes}
+      total={totalEpisodes}
+      color={progressBarColor}
+    />
+  </View>
+)}
+```
+
+La barra viene mostrata soltanto per le serie salvate con uno stato che produce un colore valido.
+
+I conteggi restano quelli già calcolati nella pagina:
+
+- `watchedEpisodes`: episodi visti delle stagioni con numero maggiore di zero.
+- `totalEpisodes`: totale degli episodi delle stagioni con numero maggiore di zero.
+
+Gli speciali, appartenenti alla stagione 0, sono esclusi dal conteggio della barra generale.
+
+**Non modificare la barra di progresso delle singole stagioni**, che continua a usare la logica esistente.
+
+### 7. Errori TypeScript rilevati
+
+Durante l'integrazione sono comparsi questi errori:
+
+- `'details' is possibly 'null'`: da risolvere usando l'accesso opzionale `details?.status`.
+- `Cannot find name 'watchStatus'`: indica che la variabile non è stata dichiarata nello stato React oppure non è stata collegata correttamente alla pagina.
+
+La sola dichiarazione dello stato non è sufficiente: bisogna anche recuperare `watch_status` dal database durante `loadDetails()` e aggiornare lo stato React.

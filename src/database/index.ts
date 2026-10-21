@@ -182,6 +182,18 @@ export async function isTvSeriesSaved(tmdbId: number): Promise<boolean> {
   return result !== null;
 }
 
+export async function getTvSeriesWatchStatus(
+  tmdbId: number,
+): Promise<string | null> {
+  const db = await getDatabase();
+
+  const result = await db.getFirstAsync<{
+    watch_status: string | null;
+  }>("SELECT watch_status FROM series WHERE tmdb_id = ? LIMIT 1", tmdbId);
+
+  return result?.watch_status ?? null;
+}
+
 export type SavedEpisodeNumber = {
   season_number: number;
   episode_number: number;
