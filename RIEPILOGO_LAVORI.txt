@@ -516,3 +516,60 @@ Durante l'integrazione sono comparsi questi errori:
 - `Cannot find name 'watchStatus'`: indica che la variabile non è stata dichiarata nello stato React oppure non è stata collegata correttamente alla pagina.
 
 La sola dichiarazione dello stato non è sufficiente: bisogna anche recuperare `watch_status` dal database durante `loadDetails()` e aggiornare lo stato React.
+
+# Riepilogo aggiornato al 23 ottobre 2026
+
+### 1. Database e struttura delle tabelle
+- Avviata la creazione delle tabelle Preferiti, Elenco Liste e Liste, con riferimenti agli identificativi TMDB e vincoli di integrità referenziale.
+- Le relazioni prevedono la cancellazione a cascata (ON DELETE CASCADE) dove necessario.
+- In Liste è previsto il campo added_at, salvato come timestamp UTC.
+- Il catalogo TMDB e la cronologia personale delle visioni rimangono separati: TMDB fornisce le informazioni aggiornate su serie, stagioni ed episodi, mentre il database locale conserva le informazioni sulle visioni effettuate.
+- La migrazione dello storico legacy è ancora in corso. La migrazione di film e liste legacy resta prevista per una fase successiva, dopo le priorità attuali.
+
+### 2. Segno di spunta animato per serie completate
+Quando tutti gli episodi ordinari della serie risultano visti, compare un segno di spunta verde (checkmark-circle) accanto al riepilogo del progresso.
+- Il segno di spunta appare con un'animazione di scala, gestita tramite Animated.
+- Vengono considerati gli episodi delle stagioni normali; gli speciali sono esclusi dal calcolo.
+- SeriesProgressBar visualizza il segno di spunta; il componente chiamante gli passa isComplete e checkmarkScale.
+
+### 3. Aggiornamento automatico dello stato della serie
+È stata introdotta una logica che sincronizza lo stato personale della serie con gli episodi contrassegnati come visti. Il controllo esclude gli episodi speciali.
+- Quando vengono visti tutti gli episodi ordinari: la serie viene impostata su up_to_date, ossia vista fino all'ultimo episodio considerato nel catalogo caricato. La barra del progresso raggiunge il completamento e compare il segno di spunta animato.
+- Quando si toglie la visione a un episodio: se la serie era up_to_date e non risulta più completa, lo stato torna automaticamente a continuing.
+- Episodi speciali: non partecipano al calcolo che determina il completamento della serie. È quindi possibile avere speciali non visti e avere comunque la serie contrassegnata come completa.
+- Aggiornamento del database: la funzione updateTvSeriesWatchStatus(tmdbId, watchStatus) salva il nuovo stato personale nella tabella series, nel campo watch_status.
+
+### 4. Aggiornamento della schermata di dettaglio
+È stata aggiunta anche la funzione refreshEpisodeHistory(), che ricarica lo storico delle visioni tramite getSavedEpisodeNumbers() dopo le modifiche alla visione degli episodi.
+
+Il processo è il seguente:
+1. L'utente segna un episodio, o una stagione, come visto oppure non visto.
+2. Lo storico delle visioni viene aggiornato e ricaricato.
+3. Viene verificato se tutti gli episodi ordinari risultano visti.
+4. Se la serie era up_to_date ma non è più completa, lo stato viene riportato a continuing; se è completa, viene impostato up_to_date.
+5. La schermata può aggiornare il progresso e il segno di spunta in base al nuovo storico, senza dover uscire e riaprire manualmente il dettaglio della serie.
+
+### 5. Pulsante Preferiti e nuove funzioni
+È stato introdotto il componente riutilizzabile FavoriteButton, con l'obiettivo di utilizzare lo stesso pulsante nelle diverse schermate dell'app, evitando di duplicare la relativa interfaccia e il comportamento.
+- Il pulsante mostra lo stato del contenuto: preferito oppure non preferito.
+- L'interazione permette di aggiungere o rimuovere il contenuto dai Preferiti.
+- È stata prevista un'animazione per rendere più evidente il cambiamento di stato.
+- Il pulsante è stato integrato nella schermata dei dettagli della serie, a destra delle informazioni principali.
+- Per regolarne la posizione verticale è stato aggiunto un View placeholder di dimensioni 42 × 42 prima del pulsante, così da abbassarlo leggermente rispetto al centro del blocco di testo.
+La nuova interfaccia si appoggia alle funzioni del database e alla tabella Preferiti, mantenendo separata la gestione dei preferiti da quella dello stato di visione della serie. In questo modo, un contenuto può essere preferito indipendentemente dal fatto che sia stato aggiunto alla propria raccolta o che sia già stato visto.
+
+Nota sullo stato dell'implementazione: il componente è stato aggiunto e posizionato nella schermata dei dettagli.
+
+### 6. Trama e informazioni della serie
+La schermata dei dettagli è stata modificata per dare maggiore risalto alla copertina e alle informazioni essenziali.
+- La trama (overview) viene visualizzata nella schermata dei dettagli e può essere espansa per leggere il testo completo, evitando di occupare troppo spazio quando è sufficiente un'anteprima.
+- Il layout dell'intestazione è stato riorganizzato per distribuire meglio titolo, informazioni della serie, generi e pulsante Preferiti.
+- Le informazioni testuali sono disposte in colonna, in modo che titolo, dettagli e generi non si affianchino accidentalmente sulla stessa riga.
+- La copertina può essere aperta in una visualizzazione a schermo intero, separata dalla normale schermata dei dettagli.
+
+### 7. Visualizzazione ingrandita della copertina e scorrimento
+È stata aggiunta una modalità dedicata alla visualizzazione della copertina, con interazioni diverse rispetto allo scorrimento ordinario della pagina.
+- La copertina può essere ingrandita tramite gesto pinch e spostata trascinandola.
+- Le interazioni di zoom e trascinamento sono limitate alla modalità a schermo intero, così da non interferire con la normale navigazione della schermata.
+- L'orientamento orizzontale viene utilizzato durante la visualizzazione ingrandita, con l'obiettivo di sfruttare meglio lo spazio disponibile.
+- L'organizzazione della schermata e dello scorrimento è stata rivista per distinguere la navigazione tra le informazioni della serie dalla manipolazione della copertina.

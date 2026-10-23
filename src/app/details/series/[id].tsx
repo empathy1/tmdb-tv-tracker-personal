@@ -17,13 +17,21 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   Image,
   ImageBackground,
+  Modal,
   Pressable,
   ScrollView,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
+import AnimatedReanimated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import type { TMDBTvDetails, TMDBTvSeasonDetails } from "@/types/tmdb";
@@ -31,6 +39,7 @@ import type { TMDBTvDetails, TMDBTvSeasonDetails } from "@/types/tmdb";
 import AddMediaButton from "@/components/AddMediaButton";
 import WatchedActionSheet from "@/components/bottomSheets/WatchedActionSheet";
 import WatchedDateSheet from "@/components/bottomSheets/WatchedDateSheet";
+import FavoriteButton from "@/components/FavoriteButton";
 import SeriesProgressBar from "@/components/SeriesProgressBar";
 import { spacing } from "@/constants/theme";
 import {
@@ -50,6 +59,7 @@ import {
   removeLastSeasonRewatch,
   saveTvSeasonEpisodes,
   saveTvSeriesDetails,
+  updateTvSeriesWatchStatus,
 } from "@/database";
 import {
   colors,
@@ -61,6 +71,11 @@ import {
   BottomSheetBackdropProps,
   BottomSheetModal,
 } from "@gorhom/bottom-sheet";
+import {
+  Gesture,
+  GestureDetector,
+  GestureHandlerRootView,
+} from "react-native-gesture-handler";
 
 type SavedEpisodeProgress = {
   season_number: number;
@@ -96,6 +111,30 @@ export default function SeriesDetails() {
   const [isSaved, setIsSaved] = useState(false);
   const [watchStatus, setWatchStatus] = useState<string | null>(null);
 
+  const [overviewExpanded, setOverviewExpanded] = useState(false);
+
+  const [showFullBackdrop, setShowFullBackdrop] = useState(false);
+
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+
+  const scale = useSharedValue(1);
+  const savedScale = useSharedValue(1);
+  const pinchStartScale = useSharedValue(1);
+
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+
+  const panStartX = useSharedValue(0);
+  const panStartY = useSharedValue(0);
+
+  const imageAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: translateX.value },
+      { translateY: translateY.value },
+      { scale: scale.value },
+    ],
+  }));
+
   const [episodeHistory, setEpisodeHistory] = useState<SavedEpisodeProgress[]>(
     [],
   );
@@ -119,6 +158,7 @@ export default function SeriesDetails() {
   const [loadingSeason, setLoadingSeason] = useState<number | null>(null);
 
   const watchedSheetRef = useRef<BottomSheetModal>(null);
+  const checkmarkScale = useRef(new Animated.Value(0)).current;
 
   const [selectedEpisode, setSelectedEpisode] = useState<
     TMDBTvSeasonDetails["episodes"][number] | null
@@ -616,8 +656,35 @@ export default function SeriesDetails() {
   }
 
   async function refreshEpisodeHistory() {
-    const savedEpisodes = await getSavedEpisodeNumbers(Number(id));
+    const seriesId = Number(id);
+    const savedEpisodes = await getSavedEpisodeNumbers(seriesId);
+
     setEpisodeHistory(savedEpisodes);
+
+    const ordinarySeasons =
+      details?.seasons.filter(
+        (season) => season.season_number > 0 && season.episode_count > 0,
+      ) ?? [];
+
+    const allEpisodesWatched =
+      ordinarySeasons.length > 0 &&
+      ordinarySeasons.every((season) => {
+        const watchedCount = savedEpisodes.filter(
+          (episode) =>
+            episode.season_number === season.season_number &&
+            episode.is_watched === 1,
+        ).length;
+
+        return watchedCount >= season.episode_count;
+      });
+
+    if (watchStatus === "up_to_date" && !allEpisodesWatched) {
+      await updateTvSeriesWatchStatus(seriesId, "continuing");
+      setWatchStatus("continuing");
+    } else if (allEpisodesWatched && watchStatus !== "up_to_date") {
+      await updateTvSeriesWatchStatus(seriesId, "up_to_date");
+      setWatchStatus("up_to_date");
+    }
   }
 
   async function runWatchedAction(action: () => Promise<void>) {
@@ -897,6 +964,63 @@ export default function SeriesDetails() {
       0,
     ) ?? 0;
 
+  const ordinarySeasons =
+    details?.seasons.filter(
+      (season) => season.season_number > 0 && season.episode_count > 0,
+    ) ?? [];
+
+  const isSeriesComplete =
+    isSaved &&
+    ordinarySeasons.length > 0 &&
+    ordinarySeasons.every((season) => {
+      const watchedInSeason = episodeHistory.filter(
+        (episode) =>
+          episode.season_number === season.season_number &&
+          episode.is_watched === 1,
+      ).length;
+
+      return watchedInSeason >= season.episode_count;
+    });
+
+  useEffect(() => {
+    if (!isSaved || !isSeriesComplete || watchStatus === "up_to_date") {
+      return;
+    }
+
+    async function updateStatus() {
+      try {
+        await updateTvSeriesWatchStatus(Number(id), "up_to_date");
+        setWatchStatus("up_to_date");
+      } catch (error) {
+        console.error("Errore aggiornando lo stato della serie:", error);
+      }
+    }
+
+    void updateStatus();
+  }, [isSaved, isSeriesComplete, watchStatus, id]);
+
+  useEffect(() => {
+    if (!isSeriesComplete) {
+      checkmarkScale.setValue(0);
+      return;
+    }
+
+    checkmarkScale.setValue(0);
+
+    Animated.sequence([
+      Animated.timing(checkmarkScale, {
+        toValue: 1.2,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+      Animated.spring(checkmarkScale, {
+        toValue: 1,
+        friction: 4,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [isSeriesComplete, checkmarkScale]);
+
   const renderWatchedBackdrop = useCallback(
     (props: BottomSheetBackdropProps) => (
       <BottomSheetBackdrop
@@ -925,17 +1049,64 @@ export default function SeriesDetails() {
           ? (seriesProgressColor ?? colors.completed)
           : colors.progressBackground;
 
+  const pinchGesture = Gesture.Pinch()
+    .onStart(() => {
+      pinchStartScale.value = scale.value;
+    })
+    .onUpdate((event) => {
+      const nextScale = pinchStartScale.value * event.scale;
+
+      scale.value = Math.max(1, Math.min(nextScale, 4));
+    })
+    .onEnd(() => {
+      savedScale.value = scale.value;
+
+      if (scale.value <= 1) {
+        scale.value = withSpring(1);
+        savedScale.value = 1;
+        translateX.value = withSpring(0);
+        translateY.value = withSpring(0);
+      }
+    });
+
+  const panGesture = Gesture.Pan()
+    .minDistance(1)
+    .maxPointers(1)
+    .onStart(() => {
+      panStartX.value = translateX.value;
+      panStartY.value = translateY.value;
+    })
+    .onUpdate((event) => {
+      if (scale.value <= 1) return;
+
+      const maxX = (screenWidth * (scale.value - 1)) / 2;
+      const maxY = (screenHeight * (scale.value - 1)) / 2;
+
+      translateX.value = Math.max(
+        -maxX,
+        Math.min(maxX, panStartX.value + event.translationX),
+      );
+
+      translateY.value = Math.max(
+        -maxY,
+        Math.min(maxY, panStartY.value + event.translationY),
+      );
+    });
+
+  const imageGestures = Gesture.Exclusive(
+    Gesture.Simultaneous(pinchGesture, panGesture),
+  );
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <Stack.Screen options={{ headerShown: false }} />
-
-      <ScrollView
-        style={[globalStyles.container, { flex: 1 }]}
-        contentContainerStyle={{
-          paddingBottom: insets.bottom + spacing.xl,
+      <Stack.Screen
+        options={{
+          headerShown: false,
+          orientation: showFullBackdrop ? "default" : "portrait",
         }}
-        showsVerticalScrollIndicator={false}
-      >
+      />
+
+      <View style={[globalStyles.container, { flex: 1 }]}>
         {loading ? (
           <View style={globalStyles.loading}>
             <ActivityIndicator size="large" color={colors.primary} />
@@ -949,91 +1120,122 @@ export default function SeriesDetails() {
             <View
               style={{
                 width: "100%",
-                height: 280 + insets.top,
+                height: 200 + insets.top,
                 backgroundColor: colors.surface,
               }}
             >
               {details.backdrop ? (
-                <ImageBackground
-                  source={{
-                    uri: `${TMDB_IMAGE_BASE_URL.replace(
-                      "/w500",
-                      "/w1280",
-                    )}${details.backdrop}`,
-                  }}
-                  style={{
-                    flex: 1,
-                    paddingTop: insets.top,
-                    justifyContent: "space-between",
-                  }}
-                  resizeMode="cover"
+                <Pressable
+                  onPress={() => setShowFullBackdrop(true)}
+                  style={{ flex: 1 }}
                 >
-                  <View
+                  <ImageBackground
+                    source={{
+                      uri: `${TMDB_IMAGE_BASE_URL.replace(
+                        "/w500",
+                        "/w1280",
+                      )}${details.backdrop}`,
+                    }}
                     style={{
                       flex: 1,
+                      paddingTop: insets.top,
                       justifyContent: "space-between",
-                      backgroundColor: "rgba(0,0,0,0.12)",
                     }}
+                    resizeMode="cover"
                   >
-                    <View style={{ padding: spacing.lg }}>
-                      <Pressable
-                        onPress={() => router.back()}
-                        style={{
-                          width: 42,
-                          height: 42,
-                          borderRadius: 21,
-                          backgroundColor: "rgba(0,0,0,0.65)",
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                      >
-                        <Ionicons
-                          name="arrow-back"
-                          size={24}
-                          color={colors.text}
-                        />
-                      </Pressable>
-                    </View>
-
                     <View
                       style={{
-                        padding: spacing.lg,
-                        paddingTop: 20,
-                        backgroundColor: "rgba(0,0,0,0.55)",
+                        flex: 1,
+                        justifyContent: "space-between",
+                        backgroundColor: "rgba(0,0,0,0.12)",
                       }}
                     >
-                      <Text style={globalStyles.title}>{details.title}</Text>
-
-                      <Text
-                        style={{
-                          color: colors.text,
-                          marginTop: spacing.sm,
-                        }}
-                      >
-                        {[
-                          details.date?.slice(0, 4),
-                          details.extraInfo,
-                          details.rating > 0
-                            ? `★ ${details.rating.toFixed(1)}/10`
-                            : "",
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </Text>
-
-                      {details.genres.length > 0 && (
-                        <Text
+                      <View style={{ padding: spacing.lg }}>
+                        <Pressable
+                          onPress={() => router.back()}
                           style={{
-                            color: colors.text,
-                            marginTop: spacing.sm,
+                            width: 42,
+                            height: 42,
+                            borderRadius: 21,
+                            backgroundColor: "rgba(0,0,0,0.65)",
+                            alignItems: "center",
+                            justifyContent: "center",
                           }}
                         >
-                          {details.genres.join(" · ")}
-                        </Text>
-                      )}
+                          <Ionicons
+                            name="arrow-back"
+                            size={24}
+                            color={colors.text}
+                          />
+                        </Pressable>
+                      </View>
+
+                      <View
+                        style={{
+                          padding: spacing.lg,
+                          paddingTop: 20,
+                          backgroundColor: "rgba(0,0,0,0.55)",
+                        }}
+                      >
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            width: "100%",
+                          }}
+                        >
+                          {/* Colonna con titolo e dettagli */}
+                          <View style={{ flex: 1, minWidth: 0 }}>
+                            <Text style={globalStyles.title}>
+                              {details.title}
+                            </Text>
+
+                            <Text
+                              style={{
+                                color: colors.text,
+                                marginTop: spacing.sm,
+                              }}
+                            >
+                              {[
+                                details.date?.slice(0, 4),
+                                details.extraInfo,
+                                details.rating > 0
+                                  ? `★ ${details.rating.toFixed(1)}/10`
+                                  : "",
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </Text>
+
+                            {details.genres.length > 0 && (
+                              <Text
+                                style={{
+                                  color: colors.text,
+                                  marginTop: spacing.sm,
+                                }}
+                              >
+                                {details.genres.join(" · ")}
+                              </Text>
+                            )}
+                          </View>
+
+                          {/* Cuore a destra */}
+                          <View
+                            style={{
+                              marginLeft: spacing.md,
+                            }}
+                          >
+                            <View style={{ width: 42, height: 42 }}></View>
+                            <FavoriteButton
+                              tmdbId={Number(id)}
+                              title={details.title}
+                            />
+                          </View>
+                        </View>
+                      </View>
                     </View>
-                  </View>
-                </ImageBackground>
+                  </ImageBackground>
+                </Pressable>
               ) : (
                 <>
                   <View style={{ padding: spacing.lg, paddingTop: insets.top }}>
@@ -1065,63 +1267,106 @@ export default function SeriesDetails() {
                       backgroundColor: colors.surface,
                     }}
                   >
-                    <Text style={globalStyles.title}>{details.title}</Text>
-
-                    <Text
+                    <View
                       style={{
-                        color: colors.text,
-                        marginTop: spacing.sm,
+                        flexDirection: "row",
+                        alignItems: "center",
+                        width: "100%",
                       }}
                     >
-                      {[
-                        details.date?.slice(0, 4),
-                        details.extraInfo,
-                        details.rating > 0
-                          ? `★ ${details.rating.toFixed(1)}/10`
-                          : "",
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </Text>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={globalStyles.title}>{details.title}</Text>
 
-                    {details.genres.length > 0 && (
-                      <Text
+                        <Text
+                          style={{
+                            color: colors.text,
+                            marginTop: spacing.sm,
+                          }}
+                        >
+                          {[
+                            details.date?.slice(0, 4),
+                            details.extraInfo,
+                            details.rating > 0
+                              ? `★ ${details.rating.toFixed(1)}/10`
+                              : "",
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </Text>
+
+                        {details.genres.length > 0 && (
+                          <Text
+                            style={{
+                              color: colors.text,
+                              marginTop: spacing.sm,
+                            }}
+                          >
+                            {details.genres.join(" · ")}
+                          </Text>
+                        )}
+                      </View>
+
+                      <View
                         style={{
-                          color: colors.text,
-                          marginTop: spacing.sm,
+                          marginLeft: spacing.md,
                         }}
                       >
-                        {details.genres.join(" · ")}
-                      </Text>
-                    )}
+                        <View style={{ width: 42, height: 42 }}></View>
+                        <FavoriteButton
+                          tmdbId={Number(id)}
+                          title={details.title}
+                        />
+                      </View>
+                    </View>
                   </View>
                 </>
               )}
             </View>
 
             {isSaved && progressBarColor !== null && (
-              <View style={{ width: "100%" }}>
+              <View style={[{ width: "100%" }, { marginBottom: spacing.md }]}>
                 <SeriesProgressBar
                   watched={watchedEpisodes}
                   total={totalEpisodes}
                   color={progressBarColor}
+                  isComplete={isSeriesComplete}
+                  checkmarkScale={checkmarkScale}
                 />
               </View>
             )}
 
-            <View style={{ padding: spacing.lg }}>
+            <ScrollView
+              style={{ padding: spacing.lg }}
+              contentContainerStyle={{
+                paddingBottom: insets.bottom + spacing.xl,
+              }}
+              showsVerticalScrollIndicator={false}
+            >
               {details.overview ? (
                 <>
-                  <Text
-                    style={[
-                      globalStyles.sectionTitle,
-                      { marginTop: spacing.md },
-                    ]}
-                  >
-                    Trama
+                  <Text style={[globalStyles.sectionTitle]}>Trama</Text>
+
+                  <Text style={globalStyles.text}>
+                    {overviewExpanded || details.overview.length <= 250
+                      ? details.overview
+                      : `${details.overview.slice(0, 250).trimEnd()}…`}
                   </Text>
 
-                  <Text style={globalStyles.text}>{details.overview}</Text>
+                  {details.overview.length > 250 && (
+                    <Pressable
+                      onPress={() =>
+                        setOverviewExpanded((previous) => !previous)
+                      }
+                      style={{ alignSelf: "flex-start", marginTop: spacing.sm }}
+                      hitSlop={8}
+                    >
+                      <Text
+                        style={{ color: colors.primary, fontWeight: "600" }}
+                      >
+                        {overviewExpanded ? "Mostra meno" : "Vedi altro"}
+                      </Text>
+                    </Pressable>
+                  )}
                 </>
               ) : null}
 
@@ -1550,10 +1795,78 @@ export default function SeriesDetails() {
                     })}
                 </View>
               )}
-            </View>
+            </ScrollView>
+            <Modal
+              visible={showFullBackdrop}
+              transparent
+              animationType="fade"
+              statusBarTranslucent
+              onRequestClose={() => setShowFullBackdrop(false)}
+            >
+              <GestureHandlerRootView style={{ flex: 1 }}>
+                <View
+                  style={{
+                    flex: 1,
+                    backgroundColor: "#000",
+                    justifyContent: "center",
+                    alignItems: "center",
+                  }}
+                >
+                  {details?.backdrop && (
+                    <GestureDetector gesture={imageGestures}>
+                      <AnimatedReanimated.View
+                        style={[
+                          {
+                            width: "100%",
+                            height: "100%",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          },
+                          imageAnimatedStyle,
+                        ]}
+                      >
+                        <Image
+                          source={{
+                            uri: `${TMDB_IMAGE_BASE_URL.replace(
+                              "/w500",
+                              "/original",
+                            )}${details.backdrop}`,
+                          }}
+                          style={{
+                            width: "100%",
+                            height: "100%",
+                          }}
+                          resizeMode="contain"
+                        />
+                      </AnimatedReanimated.View>
+                    </GestureDetector>
+                  )}
+
+                  <Pressable
+                    onPress={() => setShowFullBackdrop(false)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Chiudi immagine"
+                    hitSlop={12}
+                    style={{
+                      position: "absolute",
+                      top: insets.top + spacing.md,
+                      right: spacing.lg,
+                      width: 44,
+                      height: 44,
+                      borderRadius: 22,
+                      backgroundColor: "rgba(40,40,40,0.8)",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Ionicons name="close" size={28} color="#fff" />
+                  </Pressable>
+                </View>
+              </GestureHandlerRootView>
+            </Modal>
           </>
         )}
-      </ScrollView>
+      </View>
       {!loading && !error && details && (
         <>
           {!isSaved ? (

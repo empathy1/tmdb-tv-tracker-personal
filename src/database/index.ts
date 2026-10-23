@@ -194,6 +194,21 @@ export async function getTvSeriesWatchStatus(
   return result?.watch_status ?? null;
 }
 
+export async function updateTvSeriesWatchStatus(
+  tmdbId: number,
+  watchStatus: string,
+): Promise<void> {
+  const db = await getDatabase();
+
+  await db.runAsync(
+    `UPDATE series
+     SET watch_status = ?
+     WHERE tmdb_id = ?`,
+    watchStatus,
+    tmdbId,
+  );
+}
+
 export type SavedEpisodeNumber = {
   season_number: number;
   episode_number: number;
@@ -227,6 +242,110 @@ export async function isMovieSaved(tmdbId: number): Promise<boolean> {
   );
 
   return result !== null;
+}
+
+export async function isTvSeriesFavorite(tmdbId: number): Promise<boolean> {
+  const db = await getDatabase();
+
+  const result = await db.getFirstAsync<{ found: number }>(
+    `SELECT 1 AS found
+     FROM "preferiti"
+     WHERE item_type = 'series'
+       AND series_tmdb_id = ?
+     LIMIT 1`,
+    tmdbId,
+  );
+
+  return result !== null;
+}
+
+export async function isMovieFavorite(tmdbId: number): Promise<boolean> {
+  const db = await getDatabase();
+
+  const result = await db.getFirstAsync<{ found: number }>(
+    `SELECT 1 AS found
+     FROM "preferiti"
+     WHERE item_type = 'movie'
+       AND movie_tmdb_id = ?
+     LIMIT 1`,
+    tmdbId,
+  );
+
+  return result !== null;
+}
+
+export async function addTvSeriesFavorite(
+  tmdbId: number,
+  name: string,
+): Promise<void> {
+  const db = await getDatabase();
+
+  await db.runAsync(
+    `INSERT INTO "preferiti" (
+       item_type,
+       series_tmdb_id,
+       movie_tmdb_id,
+       name
+     )
+     SELECT 'series', ?, NULL, ?
+     WHERE NOT EXISTS (
+       SELECT 1
+       FROM "preferiti"
+       WHERE item_type = 'series'
+         AND series_tmdb_id = ?
+     )`,
+    tmdbId,
+    name,
+    tmdbId,
+  );
+}
+
+export async function removeTvSeriesFavorite(tmdbId: number): Promise<void> {
+  const db = await getDatabase();
+
+  await db.runAsync(
+    `DELETE FROM "preferiti"
+     WHERE item_type = 'series'
+       AND series_tmdb_id = ?`,
+    tmdbId,
+  );
+}
+
+export async function addMovieFavorite(
+  tmdbId: number,
+  name: string,
+): Promise<void> {
+  const db = await getDatabase();
+
+  await db.runAsync(
+    `INSERT INTO "preferiti" (
+       item_type,
+       series_tmdb_id,
+       movie_tmdb_id,
+       name
+     )
+     SELECT 'movie', NULL, ?, ?
+     WHERE NOT EXISTS (
+       SELECT 1
+       FROM "preferiti"
+       WHERE item_type = 'movie'
+         AND movie_tmdb_id = ?
+     )`,
+    tmdbId,
+    name,
+    tmdbId,
+  );
+}
+
+export async function removeMovieFavorite(tmdbId: number): Promise<void> {
+  const db = await getDatabase();
+
+  await db.runAsync(
+    `DELETE FROM "preferiti"
+     WHERE item_type = 'movie'
+       AND movie_tmdb_id = ?`,
+    tmdbId,
+  );
 }
 
 /**
