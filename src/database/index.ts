@@ -680,3 +680,97 @@ export async function getEpisodeRewatchCount(
 
   return result?.count ?? 0;
 }
+
+/**
+ * Verifica se una serie ha almeno un rewatch registrato.
+ */
+export async function hasTvSeriesRewatch(
+  seriesTmdbId: number,
+): Promise<boolean> {
+  const db = await getDatabase();
+
+  const result = await db.getFirstAsync<{ found: number }>(
+    `
+      SELECT 1 AS found
+      FROM rewatch
+      WHERE item_type = 'episode'
+        AND series_tmdb_id = ?
+      LIMIT 1
+    `,
+    seriesTmdbId,
+  );
+
+  return result !== null;
+}
+
+/**
+ * Verifica se un film ha almeno un rewatch registrato.
+ */
+export async function hasMovieRewatch(movieTmdbId: number): Promise<boolean> {
+  const db = await getDatabase();
+
+  const result = await db.getFirstAsync<{ found: number }>(
+    `
+      SELECT 1 AS found
+      FROM rewatch
+      WHERE item_type = 'movie'
+        AND movie_tmdb_id = ?
+      LIMIT 1
+    `,
+    movieTmdbId,
+  );
+
+  return result !== null;
+}
+
+export type TvSeriesRewatch = {
+  id: number;
+  series_tmdb_id: number;
+  season_number: number;
+  episode_number: number;
+  watched_at: string;
+};
+
+export async function getTvSeriesRewatches(
+  seriesTmdbId: number,
+): Promise<TvSeriesRewatch[]> {
+  const db = await getDatabase();
+
+  return db.getAllAsync<TvSeriesRewatch>(
+    `SELECT
+       id,
+       series_tmdb_id,
+       season_number,
+       episode_number,
+       watched_at
+     FROM rewatch
+     WHERE item_type = 'episode'
+       AND series_tmdb_id = ?
+     ORDER BY watched_at DESC, id DESC`,
+    seriesTmdbId,
+  );
+}
+
+export type MovieRewatch = {
+  id: number;
+  movie_tmdb_id: number;
+  watched_at: string;
+};
+
+export async function getMovieRewatches(
+  movieTmdbId: number,
+): Promise<MovieRewatch[]> {
+  const db = await getDatabase();
+
+  return db.getAllAsync<MovieRewatch>(
+    `SELECT
+       id,
+       movie_tmdb_id,
+       watched_at
+     FROM rewatch
+     WHERE item_type = 'movie'
+       AND movie_tmdb_id = ?
+     ORDER BY watched_at DESC, id DESC`,
+    movieTmdbId,
+  );
+}

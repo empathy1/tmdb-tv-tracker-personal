@@ -13,7 +13,7 @@ export const colors = {
 
   progressBackground: "#5a591b",
 
-  continuing: "#e4d501",
+  continuing: "#f3e302",
   completed: "#72ca66",
   stopped: "#c43434",
   ended: "#a14ae7",

@@ -37,6 +37,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { TMDBTvDetails, TMDBTvSeasonDetails } from "@/types/tmdb";
 
 import AddMediaButton from "@/components/AddMediaButton";
+import SeriesOptionsSheet from "@/components/bottomSheets/SeriesOptionsSheet";
 import WatchedActionSheet from "@/components/bottomSheets/WatchedActionSheet";
 import WatchedDateSheet from "@/components/bottomSheets/WatchedDateSheet";
 import FavoriteButton from "@/components/FavoriteButton";
@@ -45,11 +46,14 @@ import { spacing } from "@/constants/theme";
 import {
   addEpisodeRewatch,
   addSeasonRewatch,
+  addTvSeriesFavorite,
   clearEpisodeRewatches,
   clearSeasonRewatches,
   getEpisodeRewatchCount,
   getSavedEpisodeNumbers,
+  getTvSeriesRewatches,
   getTvSeriesWatchStatus,
+  isTvSeriesFavorite,
   isTvSeriesSaved,
   markEpisodeUnwatched,
   markEpisodeWatched,
@@ -57,6 +61,7 @@ import {
   markSeasonWatched,
   removeLastEpisodeRewatch,
   removeLastSeasonRewatch,
+  removeTvSeriesFavorite,
   saveTvSeasonEpisodes,
   saveTvSeriesDetails,
   updateTvSeriesWatchStatus,
@@ -114,6 +119,10 @@ export default function SeriesDetails() {
   const [overviewExpanded, setOverviewExpanded] = useState(false);
 
   const [showFullBackdrop, setShowFullBackdrop] = useState(false);
+
+  const optionsSheetRef = useRef<BottomSheetModal>(null);
+  const [isFavorite, setIsFavorite] = useState(false);
+  const [hasRewatch, setHasRewatch] = useState(false);
 
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
 
@@ -221,6 +230,14 @@ export default function SeriesDetails() {
           if (!Number.isFinite(mediaId) || mediaId <= 0) {
             throw new Error("Serie TV non valida.");
           }
+
+          const favorite = await isTvSeriesFavorite(mediaId);
+          const rewatchHistory = await getTvSeriesRewatches(mediaId);
+
+          if (!active) return;
+
+          setIsFavorite(favorite);
+          setHasRewatch(rewatchHistory.length > 0);
 
           const alreadySaved = await isTvSeriesSaved(mediaId);
           const savedWatchStatus = alreadySaved
@@ -451,6 +468,69 @@ export default function SeriesDetails() {
     }, [id]),
   );
 
+  function handleAddToList() {
+    Alert.alert(
+      "Liste",
+      "La gestione delle liste sarà disponibile prossimamente.",
+      [{ text: "OK" }],
+    );
+  }
+
+  async function handleToggleFavorite(): Promise<boolean> {
+    try {
+      const seriesId = Number(id);
+
+      if (isFavorite) {
+        await removeTvSeriesFavorite(seriesId);
+        setIsFavorite(false);
+      } else {
+        await addTvSeriesFavorite(seriesId, details?.title ?? "");
+        setIsFavorite(true);
+      }
+
+      return true;
+    } catch (error) {
+      console.error("Errore aggiornando i preferiti:", error);
+
+      Alert.alert("Errore", "Non è stato possibile aggiornare i preferiti.");
+
+      return false;
+    }
+  }
+
+  function handleViewRewatches() {
+    Alert.alert(
+      "Rewatch",
+      "La consultazione dello storico dei rewatch sarà disponibile prossimamente.",
+      [{ text: "OK" }],
+    );
+  }
+
+  async function handleStopWatching() {
+    try {
+      await updateTvSeriesWatchStatus(Number(id), "stopped");
+      setWatchStatus("stopped");
+    } catch (error) {
+      console.error("Errore aggiornando lo stato della serie:", error);
+
+      Alert.alert(
+        "Errore",
+        "Non è stato possibile aggiornare lo stato della serie.",
+      );
+    }
+  }
+
+  async function handleResumeWatching() {
+    try {
+      await updateTvSeriesWatchStatus(Number(id), "continuing");
+      setWatchStatus("continuing");
+    } catch (error) {
+      console.error("Errore riprendendo la serie:", error);
+
+      Alert.alert("Errore", "Non è stato possibile riprendere la visione.");
+    }
+  }
+
   function openWatchedSheet(page: "actions" | "date") {
     setWatchedSheetPage(page);
 
@@ -542,6 +622,7 @@ export default function SeriesDetails() {
   }
 
   async function saveSelectedWatchDate(date: string) {
+    await ensureSeriesSaved();
     const seriesId = Number(id);
 
     if (watchedDateMode === "first_watch") {
@@ -572,8 +653,7 @@ export default function SeriesDetails() {
 
     watchedSheetRef.current?.dismiss();
 
-    const savedEpisodes = await getSavedEpisodeNumbers(seriesId);
-    setEpisodeHistory(savedEpisodes);
+    await refreshEpisodeHistory();
   }
 
   function getEpisodeKey(seasonNumber: number, episodeNumber: number) {
@@ -657,9 +737,18 @@ export default function SeriesDetails() {
 
   async function refreshEpisodeHistory() {
     const seriesId = Number(id);
-    const savedEpisodes = await getSavedEpisodeNumbers(seriesId);
+
+    const [savedEpisodes, savedWatchStatus, rewatchHistory] = await Promise.all(
+      [
+        getSavedEpisodeNumbers(seriesId),
+        getTvSeriesWatchStatus(seriesId),
+        getTvSeriesRewatches(seriesId),
+      ],
+    );
 
     setEpisodeHistory(savedEpisodes);
+    setIsSaved(true);
+    setHasRewatch(rewatchHistory.length > 0);
 
     const ordinarySeasons =
       details?.seasons.filter(
@@ -678,13 +767,29 @@ export default function SeriesDetails() {
         return watchedCount >= season.episode_count;
       });
 
-    if (watchStatus === "up_to_date" && !allEpisodesWatched) {
-      await updateTvSeriesWatchStatus(seriesId, "continuing");
-      setWatchStatus("continuing");
-    } else if (allEpisodesWatched && watchStatus !== "up_to_date") {
-      await updateTvSeriesWatchStatus(seriesId, "up_to_date");
-      setWatchStatus("up_to_date");
+    const hasWatchedEpisodes = savedEpisodes.some(
+      (episode) => episode.is_watched === 1,
+    );
+
+    let nextWatchStatus = savedWatchStatus;
+
+    if (allEpisodesWatched) {
+      nextWatchStatus = "up_to_date";
+    } else if (
+      hasWatchedEpisodes &&
+      (savedWatchStatus === null ||
+        savedWatchStatus === "not_started_yet" ||
+        savedWatchStatus === "stopped" ||
+        savedWatchStatus === "up_to_date")
+    ) {
+      nextWatchStatus = "continuing";
     }
+
+    if (nextWatchStatus !== savedWatchStatus && nextWatchStatus !== null) {
+      await updateTvSeriesWatchStatus(seriesId, nextWatchStatus);
+    }
+
+    setWatchStatus(nextWatchStatus);
   }
 
   async function runWatchedAction(action: () => Promise<void>) {
@@ -836,7 +941,7 @@ export default function SeriesDetails() {
     }
 
     const episodes = seasonDetails[seasonNumber]?.episodes ?? [];
-    let hasRewatch = false;
+    let allEpisodesRewatched = episodes.length > 0;
 
     for (const episode of episodes) {
       const count = await getEpisodeRewatchCount(
@@ -845,14 +950,69 @@ export default function SeriesDetails() {
         episode.episode_number,
       );
 
-      if (count > 0) {
-        hasRewatch = true;
+      if (count === 0) {
+        allEpisodesRewatched = false;
         break;
       }
     }
 
-    setHasSelectedRewatch(hasRewatch);
+    setHasSelectedRewatch(allEpisodesRewatched);
     openWatchedSheet("actions");
+  }
+
+  async function handleMarkAllEpisodesWatched() {
+    if (saving || !isSaved) return;
+
+    try {
+      setSaving(true);
+
+      const seriesId = Number(id);
+      const watchedAt = new Date().toISOString();
+
+      // Recupera gli episodi aggiornati di tutte le stagioni.
+      for (const season of details?.seasons ?? []) {
+        const seasonData = await getTvSeasonDetails(
+          seriesId,
+          season.season_number,
+        );
+
+        await saveTvSeasonEpisodes(seriesId, seasonData);
+
+        setSeasonDetails((previous) => ({
+          ...previous,
+          [season.season_number]: seasonData,
+        }));
+      }
+
+      // Recupera lo storico aggiornato dal database.
+      const savedEpisodes = await getSavedEpisodeNumbers(seriesId);
+
+      // Segna come viste solo le prime visioni mancanti.
+      // Gli episodi già visti conservano data e rewatch.
+      for (const episode of savedEpisodes) {
+        if (episode.season_number <= 0 || episode.is_watched === 1) {
+          continue;
+        }
+
+        await markEpisodeWatched(
+          seriesId,
+          episode.season_number,
+          episode.episode_number,
+          watchedAt,
+        );
+      }
+
+      await refreshEpisodeHistory();
+    } catch (error) {
+      console.error("Errore segnando tutti gli episodi come visti:", error);
+
+      Alert.alert(
+        "Errore",
+        "Non è stato possibile segnare tutti gli episodi come visti.",
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function handleSaveSeries() {
@@ -887,11 +1047,6 @@ export default function SeriesDetails() {
 
       const savedEpisodes = await getSavedEpisodeNumbers(seriesId);
       setEpisodeHistory(savedEpisodes);
-
-      Alert.alert(
-        "Salvataggio completato",
-        "La serie e gli episodi sono stati salvati nel database.",
-      );
     } catch (error) {
       console.error("Errore durante il salvataggio della serie:", error);
 
@@ -902,6 +1057,32 @@ export default function SeriesDetails() {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function ensureSeriesSaved() {
+    if (isSaved) return;
+
+    const seriesId = Number(id);
+    const series = await getTvDetails(seriesId);
+    const externalIds = await getTvExternalIds(seriesId);
+
+    await saveTvSeriesDetails(series, {
+      tvdb_id: externalIds.tvdb_id,
+      imdb_id: externalIds.imdb_id,
+    });
+
+    // Salva gli episodi di tutte le stagioni, speciali inclusi.
+    for (const season of series.seasons ?? []) {
+      const seasonData = await getTvSeasonDetails(
+        seriesId,
+        season.season_number,
+      );
+
+      await saveTvSeasonEpisodes(seriesId, seasonData);
+    }
+
+    setIsSaved(true);
+    setWatchStatus("not_started_yet");
   }
 
   async function handleUpdateEpisodes() {
@@ -1120,7 +1301,7 @@ export default function SeriesDetails() {
             <View
               style={{
                 width: "100%",
-                height: 200 + insets.top,
+                height: 250 + insets.top,
                 backgroundColor: colors.surface,
               }}
             >
@@ -1150,7 +1331,14 @@ export default function SeriesDetails() {
                         backgroundColor: "rgba(0,0,0,0.12)",
                       }}
                     >
-                      <View style={{ padding: spacing.lg }}>
+                      <View
+                        style={{
+                          padding: spacing.lg,
+                          flexDirection: "row",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                        }}
+                      >
                         <Pressable
                           onPress={() => router.back()}
                           style={{
@@ -1168,12 +1356,34 @@ export default function SeriesDetails() {
                             color={colors.text}
                           />
                         </Pressable>
+
+                        <Pressable
+                          onPress={() => {
+                            optionsSheetRef.current?.present();
+                          }}
+                          accessibilityRole="button"
+                          accessibilityLabel="Opzioni serie TV"
+                          style={{
+                            width: 42,
+                            height: 42,
+                            borderRadius: 21,
+                            backgroundColor: "rgba(0,0,0,0.65)",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                        >
+                          <Ionicons
+                            name="ellipsis-vertical"
+                            size={24}
+                            color={colors.text}
+                          />
+                        </Pressable>
                       </View>
 
                       <View
                         style={{
                           padding: spacing.lg,
-                          paddingTop: 20,
+                          paddingTop: 10,
                           backgroundColor: "rgba(0,0,0,0.55)",
                         }}
                       >
@@ -1193,7 +1403,7 @@ export default function SeriesDetails() {
                             <Text
                               style={{
                                 color: colors.text,
-                                marginTop: spacing.sm,
+                                marginTop: spacing.xs,
                               }}
                             >
                               {[
@@ -1211,7 +1421,7 @@ export default function SeriesDetails() {
                               <Text
                                 style={{
                                   color: colors.text,
-                                  marginTop: spacing.sm,
+                                  marginTop: spacing.xs,
                                 }}
                               >
                                 {details.genres.join(" · ")}
@@ -1225,10 +1435,12 @@ export default function SeriesDetails() {
                               marginLeft: spacing.md,
                             }}
                           >
-                            <View style={{ width: 42, height: 42 }}></View>
+                            <View style={{ width: 30, height: 30 }}></View>
                             <FavoriteButton
                               tmdbId={Number(id)}
                               title={details.title}
+                              isFavorite={isFavorite}
+                              onToggleFavorite={handleToggleFavorite}
                             />
                           </View>
                         </View>
@@ -1238,7 +1450,14 @@ export default function SeriesDetails() {
                 </Pressable>
               ) : (
                 <>
-                  <View style={{ padding: spacing.lg, paddingTop: insets.top }}>
+                  <View
+                    style={{
+                      padding: spacing.lg,
+                      flexDirection: "row",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
                     <Pressable
                       onPress={() => router.back()}
                       style={{
@@ -1252,6 +1471,26 @@ export default function SeriesDetails() {
                     >
                       <Ionicons
                         name="arrow-back"
+                        size={24}
+                        color={colors.text}
+                      />
+                    </Pressable>
+
+                    <Pressable
+                      onPress={() => optionsSheetRef.current?.present()}
+                      accessibilityRole="button"
+                      accessibilityLabel="Opzioni serie TV"
+                      style={{
+                        width: 42,
+                        height: 42,
+                        borderRadius: 21,
+                        backgroundColor: "rgba(0,0,0,0.65)",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <Ionicons
+                        name="ellipsis-vertical"
                         size={24}
                         color={colors.text}
                       />
@@ -1315,6 +1554,8 @@ export default function SeriesDetails() {
                         <FavoriteButton
                           tmdbId={Number(id)}
                           title={details.title}
+                          isFavorite={isFavorite}
+                          onToggleFavorite={handleToggleFavorite}
                         />
                       </View>
                     </View>
@@ -1377,7 +1618,40 @@ export default function SeriesDetails() {
               ) : null}
 
               {details && (
-                <View style={{ marginTop: spacing.xl }}>
+                <View>
+                  {isSaved && (
+                    <Pressable
+                      onPress={handleMarkAllEpisodesWatched}
+                      disabled={saving}
+                      accessibilityRole="button"
+                      accessibilityLabel="Segna tutti gli episodi come visti"
+                      hitSlop={10}
+                      style={{
+                        alignSelf: "flex-end",
+                        padding: spacing.xs,
+                        opacity: saving ? 0.6 : 1,
+                      }}
+                    >
+                      {saving ? (
+                        <ActivityIndicator color={colors.completed} />
+                      ) : (
+                        <Ionicons
+                          name={
+                            isSeriesComplete
+                              ? "checkmark-circle"
+                              : "checkmark-circle-outline"
+                          }
+                          size={26}
+                          color={
+                            watchStatus === "up_to_date"
+                              ? colors.completed
+                              : colors.text
+                          }
+                        />
+                      )}
+                    </Pressable>
+                  )}
+
                   {details.seasons
                     .slice()
                     .sort((a, b) => a.season_number - b.season_number)
@@ -1471,88 +1745,85 @@ export default function SeriesDetails() {
                               </View>
                             </Pressable>
 
-                            {isSaved && (
-                              <Pressable
-                                hitSlop={10}
-                                accessibilityRole="button"
-                                accessibilityLabel="Opzioni di visione della stagione"
-                                onPress={() =>
-                                  openSeasonActions(season.season_number)
-                                }
-                                style={{
-                                  padding: spacing.xs,
-                                  marginLeft: spacing.sm,
-                                }}
-                              >
-                                {(() => {
-                                  const totalWatches = getSeasonTotalWatches(
-                                    season.season_number,
-                                    season.episode_count,
-                                  );
+                            <Pressable
+                              hitSlop={10}
+                              accessibilityRole="button"
+                              accessibilityLabel="Opzioni di visione della stagione"
+                              onPress={() =>
+                                openSeasonActions(season.season_number)
+                              }
+                              style={{
+                                padding: spacing.xs,
+                                marginLeft: spacing.sm,
+                              }}
+                            >
+                              {(() => {
+                                const totalWatches = getSeasonTotalWatches(
+                                  season.season_number,
+                                  season.episode_count,
+                                );
 
-                                  const allEpisodesWatched =
-                                    season.episode_count > 0 &&
-                                    watched >= season.episode_count;
+                                const allEpisodesWatched =
+                                  season.episode_count > 0 &&
+                                  watched >= season.episode_count;
 
-                                  return (
-                                    <View
-                                      style={{
-                                        width: 35,
-                                        height: 35,
-                                        alignItems: "center",
-                                        justifyContent: "center",
-                                        flexShrink: 0,
-                                      }}
-                                    >
-                                      <Ionicons
-                                        name={
-                                          totalWatches >= 2
-                                            ? "ellipse"
-                                            : allEpisodesWatched
-                                              ? "checkmark-circle"
-                                              : "checkmark-circle-outline"
-                                        }
-                                        size={35}
-                                        color={
-                                          totalWatches >= 2 ||
-                                          allEpisodesWatched
-                                            ? colors.completed
-                                            : colors.text
-                                        }
-                                      />
+                                return (
+                                  <View
+                                    style={{
+                                      width: 35,
+                                      height: 35,
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      flexShrink: 0,
+                                    }}
+                                  >
+                                    <Ionicons
+                                      name={
+                                        totalWatches >= 2
+                                          ? "ellipse"
+                                          : allEpisodesWatched
+                                            ? "checkmark-circle"
+                                            : "checkmark-circle-outline"
+                                      }
+                                      size={35}
+                                      color={
+                                        totalWatches >= 2 || allEpisodesWatched
+                                          ? colors.completed
+                                          : colors.text
+                                      }
+                                    />
 
-                                      {totalWatches >= 2 && (
-                                        <View
+                                    {totalWatches >= 2 && (
+                                      <View
+                                        style={{
+                                          position: "absolute",
+                                          top: 0,
+                                          left: 0,
+                                          right: 0,
+                                          bottom: 0,
+                                          alignItems: "center",
+                                          justifyContent: "center",
+                                        }}
+                                      >
+                                        <Text
+                                          numberOfLines={1}
+                                          adjustsFontSizeToFit
                                           style={{
-                                            position: "absolute",
-                                            top: 0,
-                                            left: 0,
-                                            right: 0,
-                                            bottom: 0,
-                                            alignItems: "center",
-                                            justifyContent: "center",
+                                            color: "#000000",
+                                            fontSize: 15,
+                                            fontWeight: "700",
+                                            includeFontPadding: false,
+                                            textAlign: "center",
                                           }}
                                         >
-                                          <Text
-                                            numberOfLines={1}
-                                            adjustsFontSizeToFit
-                                            style={{
-                                              color: "#000000",
-                                              fontSize: 15,
-                                              fontWeight: "700",
-                                              includeFontPadding: false,
-                                              textAlign: "center",
-                                            }}
-                                          >
-                                            ×{totalWatches}
-                                          </Text>
-                                        </View>
-                                      )}
-                                    </View>
-                                  );
-                                })()}
-                              </Pressable>
-                            )}
+                                          ×{totalWatches}
+                                        </Text>
+                                      </View>
+                                    )}
+                                  </View>
+                                );
+                              })()}
+                            </Pressable>
 
                             <Ionicons
                               name={expanded ? "chevron-up" : "chevron-down"}
@@ -1562,40 +1833,33 @@ export default function SeriesDetails() {
                             />
                           </View>
 
-                          {isSaved && (
-                            <>
-                              {(() => {
-                                const progress =
-                                  season.episode_count > 0
-                                    ? Math.min(
-                                        watched / season.episode_count,
-                                        1,
-                                      )
-                                    : 0;
+                          <>
+                            {(() => {
+                              const progress =
+                                season.episode_count > 0
+                                  ? Math.min(watched / season.episode_count, 1)
+                                  : 0;
 
-                                return (
-                                  <View style={{ marginTop: spacing.sm }}>
+                              return (
+                                <View style={{ marginTop: spacing.sm }}>
+                                  <View style={globalStyles.progressBackground}>
                                     <View
-                                      style={globalStyles.progressBackground}
-                                    >
-                                      <View
-                                        style={[
-                                          globalStyles.progressBar,
-                                          {
-                                            width: `${progress * 100}%`,
-                                            backgroundColor:
-                                              progress === 1
-                                                ? colors.completed
-                                                : colors.continuing,
-                                          },
-                                        ]}
-                                      />
-                                    </View>
+                                      style={[
+                                        globalStyles.progressBar,
+                                        {
+                                          width: `${progress * 100}%`,
+                                          backgroundColor:
+                                            progress === 1
+                                              ? colors.completed
+                                              : colors.continuing,
+                                        },
+                                      ]}
+                                    />
                                   </View>
-                                );
-                              })()}
-                            </>
-                          )}
+                                </View>
+                              );
+                            })()}
+                          </>
 
                           {expanded && (
                             <View style={{ padding: spacing.md }}>
@@ -1672,114 +1936,111 @@ export default function SeriesDetails() {
                                       </View>
                                     </Pressable>
 
-                                    {isSaved && (
-                                      <Pressable
-                                        hitSlop={10}
-                                        accessibilityRole="button"
-                                        accessibilityLabel={
-                                          episodeHistory.some(
-                                            (saved) =>
-                                              saved.season_number ===
-                                                season.season_number &&
-                                              saved.episode_number ===
-                                                episode.episode_number &&
-                                              saved.is_watched === 1,
-                                          )
-                                            ? "Opzioni di visione dell'episodio"
-                                            : "Segna l'episodio come visto"
-                                        }
-                                        onPress={() =>
-                                          openEpisodeActions(
-                                            episode,
-                                            season.season_number,
-                                          )
-                                        }
-                                        style={{
-                                          padding: spacing.xs,
-                                          marginLeft: spacing.sm,
-                                        }}
-                                      >
-                                        {(() => {
-                                          const saved = episodeHistory.find(
-                                            (item) =>
-                                              item.season_number ===
-                                                season.season_number &&
-                                              item.episode_number ===
-                                                episode.episode_number,
-                                          );
+                                    <Pressable
+                                      hitSlop={10}
+                                      accessibilityRole="button"
+                                      accessibilityLabel={
+                                        episodeHistory.some(
+                                          (saved) =>
+                                            saved.season_number ===
+                                              season.season_number &&
+                                            saved.episode_number ===
+                                              episode.episode_number &&
+                                            saved.is_watched === 1,
+                                        )
+                                          ? "Opzioni di visione dell'episodio"
+                                          : "Segna l'episodio come visto"
+                                      }
+                                      onPress={() =>
+                                        openEpisodeActions(
+                                          episode,
+                                          season.season_number,
+                                        )
+                                      }
+                                      style={{
+                                        padding: spacing.xs,
+                                        marginLeft: spacing.sm,
+                                      }}
+                                    >
+                                      {(() => {
+                                        const saved = episodeHistory.find(
+                                          (item) =>
+                                            item.season_number ===
+                                              season.season_number &&
+                                            item.episode_number ===
+                                              episode.episode_number,
+                                        );
 
-                                          const watched =
-                                            saved?.is_watched === 1;
+                                        const watched = saved?.is_watched === 1;
 
-                                          const rewatchCount =
-                                            episodeRewatchCounts[
-                                              getEpisodeKey(
-                                                season.season_number,
-                                                episode.episode_number,
-                                              )
-                                            ] ?? 0;
+                                        const rewatchCount =
+                                          episodeRewatchCounts[
+                                            getEpisodeKey(
+                                              season.season_number,
+                                              episode.episode_number,
+                                            )
+                                          ] ?? 0;
 
-                                          const totalWatches = watched
-                                            ? 1 + rewatchCount
-                                            : 0;
+                                        const totalWatches = watched
+                                          ? 1 + rewatchCount
+                                          : 0;
 
-                                          return (
-                                            <View
-                                              style={{
-                                                width: 35,
-                                                height: 35,
-                                                alignItems: "center",
-                                                justifyContent: "center",
-                                              }}
-                                            >
-                                              <Ionicons
-                                                name={
-                                                  totalWatches >= 2
-                                                    ? "ellipse"
-                                                    : watched
-                                                      ? "checkmark-circle"
-                                                      : "checkmark-circle-outline"
-                                                }
-                                                size={35}
-                                                color={
-                                                  watched
-                                                    ? colors.completed
-                                                    : colors.text
-                                                }
-                                              />
+                                        return (
+                                          <View
+                                            style={{
+                                              width: 35,
+                                              height: 35,
+                                              alignItems: "center",
+                                              justifyContent: "center",
+                                            }}
+                                          >
+                                            <Ionicons
+                                              name={
+                                                totalWatches >= 2
+                                                  ? "ellipse"
+                                                  : watched
+                                                    ? "checkmark-circle"
+                                                    : "checkmark-circle-outline"
+                                              }
+                                              size={35}
+                                              color={
+                                                watched
+                                                  ? colors.completed
+                                                  : colors.text
+                                              }
+                                            />
 
-                                              {totalWatches >= 2 && (
-                                                <View
+                                            {totalWatches >= 2 && (
+                                              <View
+                                                style={{
+                                                  position: "absolute",
+                                                  top: 0,
+                                                  left: 0,
+                                                  right: 0,
+                                                  bottom: 0,
+                                                  alignItems: "center",
+                                                  justifyContent: "center",
+                                                }}
+                                              >
+                                                <Text
+                                                  numberOfLines={1}
+                                                  adjustsFontSizeToFit
                                                   style={{
-                                                    position: "absolute",
-                                                    top: 0,
-                                                    left: 0,
-                                                    right: 0,
-                                                    bottom: 0,
-                                                    alignItems: "center",
-                                                    justifyContent: "center",
+                                                    color: "#000000",
+                                                    fontSize: 15,
+                                                    fontWeight: "700",
+                                                    includeFontPadding: false,
+                                                    textAlign: "center",
                                                   }}
                                                 >
-                                                  <Text
-                                                    numberOfLines={1}
-                                                    adjustsFontSizeToFit
-                                                    style={{
-                                                      color: "#000000",
-                                                      fontSize: 15,
-                                                      fontWeight: "700",
-                                                      includeFontPadding: false,
-                                                      textAlign: "center",
-                                                    }}
-                                                  >
-                                                    ×{totalWatches}
-                                                  </Text>
-                                                </View>
-                                              )}
-                                            </View>
-                                          );
-                                        })()}
-                                      </Pressable>
-                                    )}
+                                                  ×{totalWatches}
+                                                </Text>
+                                              </View>
+                                            )}
+                                          </View>
+                                        );
+                                      })()}
+                                    </Pressable>
                                   </View>
                                 ))
                               ) : (
@@ -1877,6 +2138,14 @@ export default function SeriesDetails() {
                 onPress={handleSaveSeries}
               />
             </View>
+          ) : watchStatus === "stopped" ? (
+            <View style={getBottomActionContainerStyle(insets.bottom)}>
+              <AddMediaButton
+                label="Riprendi la visione"
+                loading={saving}
+                onPress={handleResumeWatching}
+              />
+            </View>
           ) : seasonsToUpdate.length > 0 ? (
             <View style={getBottomActionContainerStyle(insets.bottom)}>
               <AddMediaButton
@@ -1916,6 +2185,16 @@ export default function SeriesDetails() {
           />
         )}
       </BottomSheetModal>
+      <SeriesOptionsSheet
+        ref={optionsSheetRef}
+        isFavorite={isFavorite}
+        hasRewatch={hasRewatch}
+        watchStatus={watchStatus}
+        onAddToList={handleAddToList}
+        onToggleFavorite={handleToggleFavorite}
+        onViewRewatches={handleViewRewatches}
+        onStopWatching={handleStopWatching}
+      />
     </View>
   );
 }

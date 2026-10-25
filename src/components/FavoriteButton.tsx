@@ -1,25 +1,22 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useEffect, useRef, useState } from "react";
-import { Alert, Animated, Pressable } from "react-native";
-
-import {
-    addTvSeriesFavorite,
-    isTvSeriesFavorite,
-    removeTvSeriesFavorite,
-} from "@/database";
+import { useRef } from "react";
+import { Animated, Pressable } from "react-native";
 
 type FavoriteButtonProps = {
   tmdbId: number;
   title: string;
+  isFavorite: boolean;
+  onToggleFavorite: () => Promise<boolean>;
 };
 
-export default function FavoriteButton({ tmdbId, title }: FavoriteButtonProps) {
-  const [isFavorite, setIsFavorite] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-
+export default function FavoriteButton({
+  tmdbId,
+  title,
+  isFavorite,
+  onToggleFavorite,
+}: FavoriteButtonProps) {
   const heartScale = useRef(new Animated.Value(1)).current;
-
+  /*
   useEffect(() => {
     let active = true;
 
@@ -47,6 +44,7 @@ export default function FavoriteButton({ tmdbId, title }: FavoriteButtonProps) {
       active = false;
     };
   }, [tmdbId]);
+*/
 
   function animateHeart() {
     heartScale.setValue(0.7);
@@ -65,6 +63,7 @@ export default function FavoriteButton({ tmdbId, title }: FavoriteButtonProps) {
     ]).start();
   }
 
+  /*
   async function toggleFavorite() {
     if (saving || loading) return;
 
@@ -88,25 +87,27 @@ export default function FavoriteButton({ tmdbId, title }: FavoriteButtonProps) {
       setSaving(false);
     }
   }
+    */
 
   return (
     <Pressable
-      onPress={(event) => {
+      onPress={async (event) => {
         event.stopPropagation();
-        void toggleFavorite();
+
+        const success = await onToggleFavorite();
+
+        if (success) {
+          animateHeart();
+        }
       }}
-      disabled={loading || saving}
       hitSlop={10}
       accessibilityRole="button"
       accessibilityLabel={
         isFavorite ? "Rimuovi dai preferiti" : "Aggiungi ai preferiti"
       }
-      accessibilityState={{ selected: isFavorite, disabled: loading || saving }}
       style={{
         width: 46,
         height: 46,
-        borderRadius: 23,
-        backgroundColor: "rgba(0,0,0,0.65)",
         alignItems: "center",
         justifyContent: "center",
       }}

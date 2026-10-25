@@ -23,13 +23,13 @@ export default function AddMediaButton({
       style={{
         padding: 14,
         borderRadius: 30,
-        backgroundColor: loading ? "#666" : colors.primary,
+        backgroundColor: loading ? "#666" : colors.continuing,
         alignItems: "center",
         marginTop: spacing.xl,
         opacity: loading ? 0.8 : 1,
       }}
     >
-      <Text style={{ color: colors.text, fontWeight: "bold" }}>
+      <Text style={{ color: colors.background, fontWeight: "bold" }}>
         {loading ? "Salvataggio in corso..." : label}
       </Text>
     </Pressable>

@@ -573,3 +573,30 @@ La schermata dei dettagli è stata modificata per dare maggiore risalto alla cop
 - Le interazioni di zoom e trascinamento sono limitate alla modalità a schermo intero, così da non interferire con la normale navigazione della schermata.
 - L'orientamento orizzontale viene utilizzato durante la visualizzazione ingrandita, con l'obiettivo di sfruttare meglio lo spazio disponibile.
 - L'organizzazione della schermata e dello scorrimento è stata rivista per distinguere la navigazione tra le informazioni della serie dalla manipolazione della copertina.
+
+# Lavori del 25 ottobre 2026
+
+### 1. Schermata dettagli serie
+
+- È stata completata la gestione delle opzioni della serie tramite il menu contestuale accessibile dai tre puntini sulla copertina.
+- Sono state collegate le azioni relative a Preferiti, liste e rewatch, con messaggi di conferma per le operazioni pertinenti.
+- È stata aggiunta la gestione per interrompere e riprendere la visione della serie.
+- È stata aggiornata la gestione dello stato hasRewatch, in modo da ricalcolare correttamente la disponibilità delle opzioni quando cambia lo storico delle visioni.
+
+### 2. Gestione dei rewatch
+
+- È stata corretta la logica delle opzioni di rewatch a livello di stagione: le operazioni che richiedono di aver rivisto l'intera stagione devono essere disponibili solo quando tutti gli episodi della stagione hanno almeno un rewatch registrato.
+- La disponibilità delle opzioni viene quindi verificata sulla cronologia dei singoli episodi, evitando di considerare completa una stagione quando solo una parte degli episodi è stata rivista.
+
+### 3. Aggiunta della serie tramite la registrazione di un episodio visto
+
+- È stata impostata la possibilità di aggiungere la serie al db tramite l'aggiunta dei pulsanti per segnare gli episodi come visti. Prima l'icona di spunta non veniva mostrata se la serie non era già presente nel database.
+- È stata impostata la gestione affinché la registrazione di un episodio visto possa comportare anche il salvataggio della serie, necessario per associare correttamente lo storico delle visioni.
+- L'obiettivo è mantenere sincronizzati il salvataggio della serie, la registrazione dell'episodio visto e l'aggiornamento dell'interfaccia, così che la spunta rifletta correttamente l'operazione effettuata.
+
+### 4. Icona generale degli episodi visti
+
+- Nella schermata dettagli serie, l'icona generale per segnare tutti gli episodi come visti utilizza isSeriesComplete per rappresentare lo stato effettivo della serie.
+- Quando tutti gli episodi delle stagioni ordinarie risultano visti, viene mostrata l'icona piena checkmark-circle in verde (colors.completed); negli altri casi viene mostrata checkmark-circle-outline.
+- Il controllo della completezza esclude le stagioni speciali (season_number === 0).
+
