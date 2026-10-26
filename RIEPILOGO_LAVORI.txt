@@ -600,3 +600,42 @@ La schermata dei dettagli è stata modificata per dare maggiore risalto alla cop
 - Quando tutti gli episodi delle stagioni ordinarie risultano visti, viene mostrata l'icona piena checkmark-circle in verde (colors.completed); negli altri casi viene mostrata checkmark-circle-outline.
 - Il controllo della completezza esclude le stagioni speciali (season_number === 0).
 
+## Modifiche del 26 ottobre 2026
+
+### 1. Aggiornamento delle dipendenze del progetto
+
+- È stato effettuato un aggiornamento delle dipendenze del progetto, con l'obiettivo di mantenere l'ambiente di sviluppo allineato alle versioni utilizzate e garantire la compatibilità con le funzionalità dell'applicazione.
+- Durante l'aggiornamento è stata prestata attenzione alla compatibilità tra Expo, React Native e i relativi pacchetti, in particolare quelli coinvolti nella gestione dell'interfaccia e delle date.
+- L'aggiornamento costituisce la base per le successive modifiche alla gestione dei rewatch, alla registrazione delle date di visione e alla risoluzione dei warning di deprecazione.
+
+### 2. Creazione della pagina dedicata ai rewatch
+
+- È stata creata una pagina specifica per visualizzare i rewatch registrati nell'applicazione.
+- La nuova schermata permette di raccogliere in un'unica sezione le informazioni relative alle visioni ripetute, separandole dalla normale consultazione delle serie e degli episodi.
+- È stato inoltre collegato il pulsante dedicato ai rewatch presente nel bottom sheet alla nuova pagina, così da consentire all'utente di raggiungerla direttamente dal menu delle azioni dell'episodio.
+- La modifica organizza meglio la gestione delle visioni ripetute e prepara l'interfaccia alle operazioni di modifica e cancellazione delle singole registrazioni.
+
+### 3. Aggiunta delle operazioni di modifica e cancellazione dei rewatch
+
+- Nella pagina dei rewatch sono stati aggiunti i pulsanti per modificare o eliminare una registrazione.
+- La funzione di modifica permette di intervenire sui dati del rewatch selezionato, mentre quella di eliminazione consente di rimuovere la registrazione non più desiderata.
+- Queste operazioni rendono la gestione dello storico delle visioni ripetute più completa, consentendo di correggere eventuali errori senza dover ricorrere a interventi manuali sul database.
+- È importante mantenere distinta ogni registrazione di rewatch dalla prima visione dell'episodio, preservando la coerenza dello storico personale.
+
+### 4. Visualizzazione della data di prima visione nel dettaglio serie
+
+- È stata aggiunta la data della prima visione di un episodio nella schermata dei dettagli della serie.
+- L'informazione permette di consultare direttamente, nell'elenco degli episodi, quando è stato visto per la prima volta ciascun episodio.
+
+### 5. Risoluzione del warning relativo alla gestione delle date
+
+- È stato affrontato il warning relativo alla gestione delle date, intervenendo sul codice interessato per adeguarlo alle indicazioni di compatibilità delle dipendenze utilizzate.
+- L'intervento si inserisce nel lavoro di manutenzione dell'interfaccia e nella gestione delle date associate alle visioni degli episodi.
+
+### 6. Sostituzione di `ImageBackground` per risolvere il warning di deprecazione
+
+- È stato affrontato il warning di React Native relativo alla deprecazione di `ImageBackground`, componente destinato a essere rimosso in una futura versione.
+- Per evitare di dipendere dal componente deprecato, `ImageBackground` è stato sostituito con un `View` contenente un componente `Image` posizionato come sfondo.
+- L'immagine viene dimensionata per occupare l'area del contenitore attraverso `StyleSheet.absoluteFill`, mantenendo `resizeMode="cover"`.
+- È stato riutilizzato lo stile condiviso `globalStyles.background`, evitando di introdurre riferimenti a oggetti di stile non definiti.
+- Durante la modifica sono stati risolti gli errori TypeScript incontrati nell'utilizzo di `StyleSheet.absoluteFillObject` e, successivamente, di `StyleSheet.absoluteFill`.

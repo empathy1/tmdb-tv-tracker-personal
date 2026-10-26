@@ -118,6 +118,15 @@ export const globalStyles = StyleSheet.create({
     height: "100%",
     borderRadius: 0,
   },
+
+  background: {
+    position: "relative",
+    overflow: "hidden",
+  },
+
+  backgroundImage: {
+    ...StyleSheet.absoluteFill,
+  },
 });
 
 export function getBottomActionContainerStyle(bottomInset: number): ViewStyle {

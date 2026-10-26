@@ -214,6 +214,7 @@ export type SavedEpisodeNumber = {
   episode_number: number;
   tmdb_id: number | null;
   is_watched: number;
+  watched_at: string | null;
 };
 
 export async function getSavedEpisodeNumbers(
@@ -226,7 +227,8 @@ export async function getSavedEpisodeNumbers(
        season_number,
        episode_number,
        tmdb_id,
-       is_watched
+       is_watched,
+       watched_at
      FROM episodes
      WHERE series_tmdb_id = ?`,
     seriesTmdbId,
@@ -748,6 +750,41 @@ export async function getTvSeriesRewatches(
        AND series_tmdb_id = ?
      ORDER BY watched_at DESC, id DESC`,
     seriesTmdbId,
+  );
+}
+
+/**
+ * Modifica la data e l'ora di un singolo rewatch.
+ */
+export async function updateTvSeriesRewatch(
+  rewatchId: number,
+  watchedAt: string,
+): Promise<void> {
+  const db = await getDatabase();
+
+  await db.runAsync(
+    `UPDATE rewatch
+     SET watched_at = ?
+     WHERE id = ?
+       AND item_type = 'episode'
+       AND series_tmdb_id IS NOT NULL`,
+    watchedAt,
+    rewatchId,
+  );
+}
+
+/**
+ * Elimina un singolo rewatch senza modificare la prima visione.
+ */
+export async function deleteTvSeriesRewatch(rewatchId: number): Promise<void> {
+  const db = await getDatabase();
+
+  await db.runAsync(
+    `DELETE FROM rewatch
+     WHERE id = ?
+       AND item_type = 'episode'
+       AND series_tmdb_id IS NOT NULL`,
+    rewatchId,
   );
 }
 

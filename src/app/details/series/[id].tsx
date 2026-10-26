@@ -19,10 +19,10 @@ import {
   Alert,
   Animated,
   Image,
-  ImageBackground,
   Modal,
   Pressable,
   ScrollView,
+  StyleSheet,
   Text,
   useWindowDimensions,
   View,
@@ -87,6 +87,7 @@ type SavedEpisodeProgress = {
   episode_number: number;
   tmdb_id: number | null;
   is_watched: number;
+  watched_at: string | null;
 };
 
 type SeriesDetailItem = {
@@ -499,11 +500,10 @@ export default function SeriesDetails() {
   }
 
   function handleViewRewatches() {
-    Alert.alert(
-      "Rewatch",
-      "La consultazione dello storico dei rewatch sarà disponibile prossimamente.",
-      [{ text: "OK" }],
-    );
+    router.push({
+      pathname: "../rewatches/series/[id]",
+      params: { id: String(id) },
+    });
   }
 
   async function handleStopWatching() {
@@ -727,8 +727,8 @@ export default function SeriesDetails() {
       value: new Date(),
       mode: "date",
       maximumDate: new Date(),
-      onChange: (event, selectedDate) => {
-        if (event.type === "set" && selectedDate) {
+      onValueChange: (_event, selectedDate) => {
+        if (selectedDate) {
           void saveSelectedWatchDate(selectedDate.toISOString());
         }
       },
@@ -1310,20 +1310,14 @@ export default function SeriesDetails() {
                   onPress={() => setShowFullBackdrop(true)}
                   style={{ flex: 1 }}
                 >
-                  <ImageBackground
-                    source={{
-                      uri: `${TMDB_IMAGE_BASE_URL.replace(
-                        "/w500",
-                        "/w1280",
-                      )}${details.backdrop}`,
-                    }}
-                    style={{
-                      flex: 1,
-                      paddingTop: insets.top,
-                      justifyContent: "space-between",
-                    }}
-                    resizeMode="cover"
-                  >
+                  <View style={globalStyles.background}>
+                    <Image
+                      source={{
+                        uri: `${TMDB_IMAGE_BASE_URL.replace("/w500", "/w1280")}${details.backdrop}`,
+                      }}
+                      style={StyleSheet.absoluteFill}
+                      resizeMode="cover"
+                    />
                     <View
                       style={{
                         flex: 1,
@@ -1446,7 +1440,7 @@ export default function SeriesDetails() {
                         </View>
                       </View>
                     </View>
-                  </ImageBackground>
+                  </View>
                 </Pressable>
               ) : (
                 <>
@@ -1930,9 +1924,53 @@ export default function SeriesDetails() {
                                               { marginTop: spacing.xs },
                                             ]}
                                           >
-                                            {episode.air_date}
+                                            Uscita: {episode.air_date}
                                           </Text>
                                         ) : null}
+
+                                        {(() => {
+                                          const saved = episodeHistory.find(
+                                            (item) =>
+                                              item.season_number ===
+                                                season.season_number &&
+                                              item.episode_number ===
+                                                episode.episode_number,
+                                          );
+
+                                          if (
+                                            saved?.is_watched !== 1 ||
+                                            !saved.watched_at
+                                          ) {
+                                            return null;
+                                          }
+
+                                          const watchedDate = new Date(
+                                            saved.watched_at,
+                                          );
+
+                                          if (
+                                            Number.isNaN(watchedDate.getTime())
+                                          ) {
+                                            return null;
+                                          }
+
+                                          return (
+                                            <Text
+                                              style={[
+                                                globalStyles.caption,
+                                                {
+                                                  marginTop: spacing.xs,
+                                                  color: colors.completed,
+                                                },
+                                              ]}
+                                            >
+                                              Prima visione:{" "}
+                                              {watchedDate.toLocaleDateString(
+                                                "it-IT",
+                                              )}
+                                            </Text>
+                                          );
+                                        })()}
                                       </View>
                                     </Pressable>
 
