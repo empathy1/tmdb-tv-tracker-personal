@@ -426,7 +426,32 @@ export async function markSeasonWatched(
      SET is_watched = 1,
          watched_at = ?
      WHERE series_tmdb_id = ?
-       AND season_number = ?`,
+       AND season_number = ?
+       AND is_watched = 0`,
+    watchedAt,
+    seriesTmdbId,
+    seasonNumber,
+  );
+}
+
+/**
+ * Modifica la data della prima visione di tutti
+ * gli episodi già visti di una stagione.
+ * Non modifica lo storico dei rewatch.
+ */
+export async function updateSeasonFirstWatchDate(
+  seriesTmdbId: number,
+  seasonNumber: number,
+  watchedAt: string,
+): Promise<void> {
+  const db = await getDatabase();
+
+  await db.runAsync(
+    `UPDATE episodes
+     SET watched_at = ?
+     WHERE series_tmdb_id = ?
+       AND season_number = ?
+       AND is_watched = 1`,
     watchedAt,
     seriesTmdbId,
     seasonNumber,
@@ -809,5 +834,176 @@ export async function getMovieRewatches(
        AND movie_tmdb_id = ?
      ORDER BY watched_at DESC, id DESC`,
     movieTmdbId,
+  );
+}
+
+export type MovieWatchInfo = {
+  is_watched: number;
+  watched_at: string | null;
+};
+
+/**
+ * Recupera lo stato della prima visione del film.
+ */
+export async function getMovieWatchInfo(
+  movieTmdbId: number,
+): Promise<MovieWatchInfo | null> {
+  const db = await getDatabase();
+
+  return db.getFirstAsync<MovieWatchInfo>(
+    `SELECT is_watched, watched_at
+     FROM movies
+     WHERE tmdb_id = ?
+     LIMIT 1`,
+    movieTmdbId,
+  );
+}
+
+/**
+ * Registra la prima visione del film.
+ */
+export async function markMovieWatched(
+  movieTmdbId: number,
+  watchedAt: string = new Date().toISOString(),
+): Promise<void> {
+  const db = await getDatabase();
+
+  await db.runAsync(
+    `UPDATE movies
+     SET is_watched = 1,
+         watched_at = ?
+     WHERE tmdb_id = ?`,
+    watchedAt,
+    movieTmdbId,
+  );
+}
+
+/**
+ * Segna il film come non visto ed elimina tutti i suoi rewatch.
+ */
+export async function markMovieUnwatched(movieTmdbId: number): Promise<void> {
+  const db = await getDatabase();
+
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `UPDATE movies
+       SET is_watched = 0,
+           watched_at = NULL
+       WHERE tmdb_id = ?`,
+      movieTmdbId,
+    );
+
+    await db.runAsync(
+      `DELETE FROM rewatch
+       WHERE item_type = 'movie'
+         AND movie_tmdb_id = ?`,
+      movieTmdbId,
+    );
+  });
+}
+
+/**
+ * Registra un rewatch di un film già visto.
+ */
+export async function addMovieRewatch(
+  movieTmdbId: number,
+  watchedAt: string = new Date().toISOString(),
+): Promise<void> {
+  const db = await getDatabase();
+
+  await db.runAsync(
+    `INSERT INTO rewatch (
+       item_type,
+       episode_tmdb_id,
+       series_tmdb_id,
+       season_number,
+       episode_number,
+       movie_tmdb_id,
+       watched_at
+     )
+     SELECT
+       'movie',
+       NULL,
+       NULL,
+       NULL,
+       NULL,
+       tmdb_id,
+       ?
+     FROM movies
+     WHERE tmdb_id = ?
+       AND is_watched = 1`,
+    watchedAt,
+    movieTmdbId,
+  );
+}
+
+/**
+ * Elimina tutti i rewatch del film, conservando la prima visione.
+ */
+export async function clearMovieRewatches(movieTmdbId: number): Promise<void> {
+  const db = await getDatabase();
+
+  await db.runAsync(
+    `DELETE FROM rewatch
+     WHERE item_type = 'movie'
+       AND movie_tmdb_id = ?`,
+    movieTmdbId,
+  );
+}
+
+/**
+ * Elimina il rewatch più recente del film.
+ */
+export async function removeLastMovieRewatch(
+  movieTmdbId: number,
+): Promise<void> {
+  const db = await getDatabase();
+
+  await db.runAsync(
+    `DELETE FROM rewatch
+     WHERE id = (
+       SELECT id
+       FROM rewatch
+       WHERE item_type = 'movie'
+         AND movie_tmdb_id = ?
+       ORDER BY watched_at DESC, id DESC
+       LIMIT 1
+     )`,
+    movieTmdbId,
+  );
+}
+
+/**
+ * Modifica la data di un singolo rewatch del film.
+ */
+export async function updateMovieRewatch(
+  rewatchId: number,
+  watchedAt: string,
+): Promise<void> {
+  const db = await getDatabase();
+
+  await db.runAsync(
+    `UPDATE rewatch
+     SET watched_at = ?
+     WHERE id = ?
+       AND item_type = 'movie'
+       AND movie_tmdb_id IS NOT NULL`,
+    watchedAt,
+    rewatchId,
+  );
+}
+
+/**
+ * Elimina un singolo rewatch senza modificare la prima visione.
+ */
+export async function deleteMovieRewatch(rewatchId: number): Promise<void> {
+  const db = await getDatabase();
+
+  await db.runAsync(
+    `DELETE FROM rewatch
+     WHERE id = ?
+       AND item_type = 'movie'
+       AND movie_tmdb_id IS NOT NULL`,
+    rewatchId,
   );
 }

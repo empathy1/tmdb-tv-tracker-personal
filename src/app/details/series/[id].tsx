@@ -19,19 +19,12 @@ import {
   Alert,
   Animated,
   Image,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  useWindowDimensions,
   View,
 } from "react-native";
-import AnimatedReanimated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring,
-} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import type { TMDBTvDetails, TMDBTvSeasonDetails } from "@/types/tmdb";
@@ -42,6 +35,7 @@ import WatchedActionSheet from "@/components/bottomSheets/WatchedActionSheet";
 import WatchedDateSheet from "@/components/bottomSheets/WatchedDateSheet";
 import FavoriteButton from "@/components/FavoriteButton";
 import SeriesProgressBar from "@/components/SeriesProgressBar";
+import ZoomableImageModal from "@/components/ZoomableImageModal";
 import { spacing } from "@/constants/theme";
 import {
   addEpisodeRewatch,
@@ -64,6 +58,7 @@ import {
   removeTvSeriesFavorite,
   saveTvSeasonEpisodes,
   saveTvSeriesDetails,
+  updateSeasonFirstWatchDate,
   updateTvSeriesWatchStatus,
 } from "@/database";
 import {
@@ -76,11 +71,6 @@ import {
   BottomSheetBackdropProps,
   BottomSheetModal,
 } from "@gorhom/bottom-sheet";
-import {
-  Gesture,
-  GestureDetector,
-  GestureHandlerRootView,
-} from "react-native-gesture-handler";
 
 type SavedEpisodeProgress = {
   season_number: number;
@@ -125,26 +115,6 @@ export default function SeriesDetails() {
   const [isFavorite, setIsFavorite] = useState(false);
   const [hasRewatch, setHasRewatch] = useState(false);
 
-  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
-
-  const scale = useSharedValue(1);
-  const savedScale = useSharedValue(1);
-  const pinchStartScale = useSharedValue(1);
-
-  const translateX = useSharedValue(0);
-  const translateY = useSharedValue(0);
-
-  const panStartX = useSharedValue(0);
-  const panStartY = useSharedValue(0);
-
-  const imageAnimatedStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: translateX.value },
-      { translateY: translateY.value },
-      { scale: scale.value },
-    ],
-  }));
-
   const [episodeHistory, setEpisodeHistory] = useState<SavedEpisodeProgress[]>(
     [],
   );
@@ -168,6 +138,12 @@ export default function SeriesDetails() {
   const [loadingSeason, setLoadingSeason] = useState<number | null>(null);
 
   const watchedSheetRef = useRef<BottomSheetModal>(null);
+  const watchedDateSheetRef = useRef<BottomSheetModal>(null);
+
+  const pendingDateModeRef = useRef<
+    "first_watch" | "rewatch" | "edit_first_watch" | null
+  >(null);
+
   const checkmarkScale = useRef(new Animated.Value(0)).current;
 
   const [selectedEpisode, setSelectedEpisode] = useState<
@@ -176,12 +152,8 @@ export default function SeriesDetails() {
 
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
 
-  const [watchedSheetPage, setWatchedSheetPage] = useState<"actions" | "date">(
-    "actions",
-  );
-
   const [watchedDateMode, setWatchedDateMode] = useState<
-    "first_watch" | "rewatch" | null
+    "first_watch" | "rewatch" | "edit_first_watch" | null
   >(null);
 
   const [hasSelectedRewatch, setHasSelectedRewatch] = useState(false);
@@ -484,10 +456,40 @@ export default function SeriesDetails() {
       if (isFavorite) {
         await removeTvSeriesFavorite(seriesId);
         setIsFavorite(false);
-      } else {
-        await addTvSeriesFavorite(seriesId, details?.title ?? "");
-        setIsFavorite(true);
+        return true;
       }
+
+      // Se la serie non è salvata, salviamo prima i dati e gli episodi.
+      const alreadySaved = await isTvSeriesSaved(seriesId);
+
+      if (!alreadySaved) {
+        const series = await getTvDetails(seriesId);
+        const externalIds = await getTvExternalIds(seriesId);
+
+        await saveTvSeriesDetails(series, {
+          tvdb_id: externalIds.tvdb_id,
+          imdb_id: externalIds.imdb_id,
+        });
+
+        for (const season of series.seasons ?? []) {
+          const seasonData = await getTvSeasonDetails(
+            seriesId,
+            season.season_number,
+          );
+
+          await saveTvSeasonEpisodes(seriesId, seasonData);
+        }
+
+        setIsSaved(true);
+        setWatchStatus("not_started_yet");
+
+        const savedEpisodes = await getSavedEpisodeNumbers(seriesId);
+        setEpisodeHistory(savedEpisodes);
+      }
+
+      // Aggiungiamo la serie ai preferiti solo dopo il salvataggio.
+      await addTvSeriesFavorite(seriesId, details?.title ?? "");
+      setIsFavorite(true);
 
       return true;
     } catch (error) {
@@ -531,12 +533,15 @@ export default function SeriesDetails() {
     }
   }
 
-  function openWatchedSheet(page: "actions" | "date") {
-    setWatchedSheetPage(page);
+  function openWatchedSheet() {
+    pendingDateModeRef.current = null;
+    watchedSheetRef.current?.present();
+  }
 
-    requestAnimationFrame(() => {
-      watchedSheetRef.current?.present();
-    });
+  function openDateSheet(mode: "first_watch" | "rewatch" | "edit_first_watch") {
+    pendingDateModeRef.current = mode;
+    setWatchedDateMode(mode);
+    watchedSheetRef.current?.dismiss();
   }
 
   async function openEpisodeActions(
@@ -560,11 +565,13 @@ export default function SeriesDetails() {
       );
 
       setHasSelectedRewatch(count > 0);
+      setSelectedEpisode(episode);
+      setSelectedSeason(seasonNumber);
       setWatchedDateMode(null);
-      openWatchedSheet("actions");
+      openWatchedSheet();
     } else {
       setWatchedDateMode("first_watch");
-      openWatchedSheet("date");
+      openDateSheet("first_watch");
     }
   }
 
@@ -625,7 +632,10 @@ export default function SeriesDetails() {
     await ensureSeriesSaved();
     const seriesId = Number(id);
 
-    if (watchedDateMode === "first_watch") {
+    if (
+      watchedDateMode === "first_watch" ||
+      watchedDateMode === "edit_first_watch"
+    ) {
       if (selectedEpisode && selectedSeason !== null) {
         await markEpisodeWatched(
           seriesId,
@@ -634,7 +644,11 @@ export default function SeriesDetails() {
           date,
         );
       } else if (selectedSeason !== null) {
-        await markSeasonWatched(seriesId, selectedSeason, date);
+        if (watchedDateMode === "first_watch") {
+          await markSeasonWatched(seriesId, selectedSeason, date);
+        } else {
+          await updateSeasonFirstWatchDate(seriesId, selectedSeason, date);
+        }
       }
     }
 
@@ -651,7 +665,8 @@ export default function SeriesDetails() {
       }
     }
 
-    watchedSheetRef.current?.dismiss();
+    watchedDateSheetRef.current?.dismiss();
+    setWatchedDateMode(null);
 
     await refreshEpisodeHistory();
   }
@@ -723,14 +738,66 @@ export default function SeriesDetails() {
   }
 
   function handleCustomWatchDate() {
+    const now = new Date();
+
+    const selectedWatchDates = episodeHistory.filter(
+      (episode) =>
+        episode.season_number === selectedSeason &&
+        episode.is_watched === 1 &&
+        episode.watched_at,
+    );
+
+    const existingDate =
+      selectedEpisode && selectedSeason !== null
+        ? episodeHistory.find(
+            (episode) =>
+              episode.season_number === selectedSeason &&
+              episode.episode_number === selectedEpisode.episode_number,
+          )?.watched_at
+        : selectedWatchDates[0]?.watched_at;
+
+    const initialDate = existingDate ? new Date(existingDate) : now;
+
     DateTimePickerAndroid.open({
-      value: new Date(),
+      value: initialDate,
       mode: "date",
-      maximumDate: new Date(),
+      maximumDate: now,
       onValueChange: (_event, selectedDate) => {
-        if (selectedDate) {
-          void saveSelectedWatchDate(selectedDate.toISOString());
-        }
+        if (!selectedDate) return;
+
+        const chosenDate = new Date(selectedDate);
+        chosenDate.setHours(
+          initialDate.getHours(),
+          initialDate.getMinutes(),
+          initialDate.getSeconds(),
+          0,
+        );
+
+        DateTimePickerAndroid.open({
+          value: chosenDate,
+          mode: "time",
+          onValueChange: (_timeEvent, selectedTime) => {
+            if (!selectedTime) return;
+
+            const finalDate = new Date(chosenDate);
+            finalDate.setHours(
+              selectedTime.getHours(),
+              selectedTime.getMinutes(),
+              selectedTime.getSeconds(),
+              0,
+            );
+
+            if (finalDate > new Date()) {
+              Alert.alert(
+                "Data non valida",
+                "La data e l'ora della visione non possono essere future.",
+              );
+              return;
+            }
+
+            void saveSelectedWatchDate(finalDate.toISOString());
+          },
+        });
       },
     });
   }
@@ -846,8 +913,7 @@ export default function SeriesDetails() {
   }
 
   function handleRewatch() {
-    setWatchedDateMode("rewatch");
-    setWatchedSheetPage("date");
+    openDateSheet("rewatch");
   }
 
   function handleResetRewatch() {
@@ -936,7 +1002,7 @@ export default function SeriesDetails() {
     if (!isSeasonWatched(seasonNumber)) {
       setHasSelectedRewatch(false);
       setWatchedDateMode("first_watch");
-      openWatchedSheet("date");
+      openDateSheet("first_watch");
       return;
     }
 
@@ -957,7 +1023,7 @@ export default function SeriesDetails() {
     }
 
     setHasSelectedRewatch(allEpisodesRewatched);
-    openWatchedSheet("actions");
+    openWatchedSheet();
   }
 
   async function handleMarkAllEpisodesWatched() {
@@ -1230,54 +1296,6 @@ export default function SeriesDetails() {
           ? (seriesProgressColor ?? colors.completed)
           : colors.progressBackground;
 
-  const pinchGesture = Gesture.Pinch()
-    .onStart(() => {
-      pinchStartScale.value = scale.value;
-    })
-    .onUpdate((event) => {
-      const nextScale = pinchStartScale.value * event.scale;
-
-      scale.value = Math.max(1, Math.min(nextScale, 4));
-    })
-    .onEnd(() => {
-      savedScale.value = scale.value;
-
-      if (scale.value <= 1) {
-        scale.value = withSpring(1);
-        savedScale.value = 1;
-        translateX.value = withSpring(0);
-        translateY.value = withSpring(0);
-      }
-    });
-
-  const panGesture = Gesture.Pan()
-    .minDistance(1)
-    .maxPointers(1)
-    .onStart(() => {
-      panStartX.value = translateX.value;
-      panStartY.value = translateY.value;
-    })
-    .onUpdate((event) => {
-      if (scale.value <= 1) return;
-
-      const maxX = (screenWidth * (scale.value - 1)) / 2;
-      const maxY = (screenHeight * (scale.value - 1)) / 2;
-
-      translateX.value = Math.max(
-        -maxX,
-        Math.min(maxX, panStartX.value + event.translationX),
-      );
-
-      translateY.value = Math.max(
-        -maxY,
-        Math.min(maxY, panStartY.value + event.translationY),
-      );
-    });
-
-  const imageGestures = Gesture.Exclusive(
-    Gesture.Simultaneous(pinchGesture, panGesture),
-  );
-
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <Stack.Screen
@@ -1310,7 +1328,14 @@ export default function SeriesDetails() {
                   onPress={() => setShowFullBackdrop(true)}
                   style={{ flex: 1 }}
                 >
-                  <View style={globalStyles.background}>
+                  <View
+                    style={{
+                      flex: 1,
+                      paddingTop: insets.top,
+                      justifyContent: "space-between",
+                      overflow: "hidden",
+                    }}
+                  >
                     <Image
                       source={{
                         uri: `${TMDB_IMAGE_BASE_URL.replace("/w500", "/w1280")}${details.backdrop}`,
@@ -1965,8 +1990,16 @@ export default function SeriesDetails() {
                                               ]}
                                             >
                                               Prima visione:{" "}
-                                              {watchedDate.toLocaleDateString(
+                                              {watchedDate.toLocaleString(
                                                 "it-IT",
+                                                {
+                                                  day: "2-digit",
+                                                  month: "2-digit",
+                                                  year: "numeric",
+                                                  hour: "2-digit",
+                                                  minute: "2-digit",
+                                                  second: "2-digit",
+                                                },
                                               )}
                                             </Text>
                                           );
@@ -2095,74 +2128,19 @@ export default function SeriesDetails() {
                 </View>
               )}
             </ScrollView>
-            <Modal
+            <ZoomableImageModal
               visible={showFullBackdrop}
-              transparent
-              animationType="fade"
-              statusBarTranslucent
-              onRequestClose={() => setShowFullBackdrop(false)}
-            >
-              <GestureHandlerRootView style={{ flex: 1 }}>
-                <View
-                  style={{
-                    flex: 1,
-                    backgroundColor: "#000",
-                    justifyContent: "center",
-                    alignItems: "center",
-                  }}
-                >
-                  {details?.backdrop && (
-                    <GestureDetector gesture={imageGestures}>
-                      <AnimatedReanimated.View
-                        style={[
-                          {
-                            width: "100%",
-                            height: "100%",
-                            alignItems: "center",
-                            justifyContent: "center",
-                          },
-                          imageAnimatedStyle,
-                        ]}
-                      >
-                        <Image
-                          source={{
-                            uri: `${TMDB_IMAGE_BASE_URL.replace(
-                              "/w500",
-                              "/original",
-                            )}${details.backdrop}`,
-                          }}
-                          style={{
-                            width: "100%",
-                            height: "100%",
-                          }}
-                          resizeMode="contain"
-                        />
-                      </AnimatedReanimated.View>
-                    </GestureDetector>
-                  )}
-
-                  <Pressable
-                    onPress={() => setShowFullBackdrop(false)}
-                    accessibilityRole="button"
-                    accessibilityLabel="Chiudi immagine"
-                    hitSlop={12}
-                    style={{
-                      position: "absolute",
-                      top: insets.top + spacing.md,
-                      right: spacing.lg,
-                      width: 44,
-                      height: 44,
-                      borderRadius: 22,
-                      backgroundColor: "rgba(40,40,40,0.8)",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <Ionicons name="close" size={28} color="#fff" />
-                  </Pressable>
-                </View>
-              </GestureHandlerRootView>
-            </Modal>
+              imageUri={
+                details?.backdrop
+                  ? `${TMDB_IMAGE_BASE_URL.replace(
+                      "/w500",
+                      "/original",
+                    )}${details.backdrop}`
+                  : null
+              }
+              topInset={insets.top}
+              onClose={() => setShowFullBackdrop(false)}
+            />
           </>
         )}
       </View>
@@ -2199,29 +2177,47 @@ export default function SeriesDetails() {
       <BottomSheetModal
         ref={watchedSheetRef}
         index={0}
-        snapPoints={watchedSheetPage === "actions" ? ["35%"] : ["45%"]}
+        snapPoints={["35%"]}
         enablePanDownToClose
         backdropComponent={renderWatchedBackdrop}
         backgroundStyle={{ backgroundColor: colors.surface }}
         handleIndicatorStyle={{ backgroundColor: colors.text }}
+        onDismiss={() => {
+          const mode = pendingDateModeRef.current;
+
+          if (mode === null) return;
+
+          pendingDateModeRef.current = null;
+          watchedDateSheetRef.current?.present();
+        }}
       >
-        {watchedSheetPage === "actions" ? (
-          <WatchedActionSheet
-            onUnwatch={handleUnwatch}
-            onRewatch={handleRewatch}
-            onResetRewatch={handleResetRewatch}
-            hasRewatch={hasSelectedRewatch}
-            onRemoveLastRewatch={handleRemoveLastRewatch}
-          />
-        ) : (
-          <WatchedDateSheet
-            onNow={handleWatchNow}
-            onYesterday={handleWatchYesterday}
-            onReleaseDate={handleWatchOnReleaseDate}
-            onCustomDate={handleCustomWatchDate}
-            hasReleaseDate={Boolean(getSelectedReleaseDate())}
-          />
-        )}
+        <WatchedActionSheet
+          onUnwatch={handleUnwatch}
+          onRewatch={handleRewatch}
+          onResetRewatch={handleResetRewatch}
+          hasRewatch={hasSelectedRewatch}
+          onRemoveLastRewatch={handleRemoveLastRewatch}
+          onEditFirstWatch={() => openDateSheet("edit_first_watch")}
+        />
+      </BottomSheetModal>
+
+      <BottomSheetModal
+        ref={watchedDateSheetRef}
+        index={0}
+        snapPoints={["45%"]}
+        enablePanDownToClose
+        backdropComponent={renderWatchedBackdrop}
+        backgroundStyle={{ backgroundColor: colors.surface }}
+        handleIndicatorStyle={{ backgroundColor: colors.text }}
+        onDismiss={() => setWatchedDateMode(null)}
+      >
+        <WatchedDateSheet
+          onNow={() => void saveSelectedWatchDate(new Date().toISOString())}
+          onYesterday={handleWatchYesterday}
+          onReleaseDate={handleWatchOnReleaseDate}
+          onCustomDate={handleCustomWatchDate}
+          hasReleaseDate={Boolean(getSelectedReleaseDate())}
+        />
       </BottomSheetModal>
       <SeriesOptionsSheet
         ref={optionsSheetRef}
