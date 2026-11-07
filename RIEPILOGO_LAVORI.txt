@@ -639,3 +639,334 @@ La schermata dei dettagli è stata modificata per dare maggiore risalto alla cop
 - L'immagine viene dimensionata per occupare l'area del contenitore attraverso `StyleSheet.absoluteFill`, mantenendo `resizeMode="cover"`.
 - È stato riutilizzato lo stile condiviso `globalStyles.background`, evitando di introdurre riferimenti a oggetti di stile non definiti.
 - Durante la modifica sono stati risolti gli errori TypeScript incontrati nell'utilizzo di `StyleSheet.absoluteFillObject` e, successivamente, di `StyleSheet.absoluteFill`.
+
+## Lavori del 25 ottobre 2026
+
+### Schermata dettagli serie
+
+- È stata completata la gestione delle opzioni della serie tramite il menu contestuale accessibile dai tre puntini sulla copertina.
+- Sono state collegate le azioni relative a Preferiti, liste e rewatch, con messaggi di conferma per le operazioni pertinenti.
+- È stata aggiunta la gestione per interrompere e riprendere la visione della serie.
+- È stata aggiornata la gestione dello stato `hasRewatch`, in modo da ricalcolare correttamente la disponibilità delle opzioni quando cambia lo storico delle visioni.
+
+### Gestione dei rewatch
+
+- È stata corretta la logica delle opzioni di rewatch a livello di stagione: le operazioni che richiedono di aver rivisto l'intera stagione devono essere disponibili solo quando tutti gli episodi della stagione hanno almeno un rewatch registrato.
+- La disponibilità delle opzioni viene quindi verificata sulla cronologia dei singoli episodi, evitando di considerare completa una stagione quando solo una parte degli episodi è stata rivista.
+
+### Icona generale degli episodi visti
+
+- Nella schermata dettagli serie, l'icona generale per segnare tutti gli episodi come visti utilizza `isSeriesComplete` per rappresentare lo stato effettivo della serie.
+- Quando tutti gli episodi delle stagioni ordinarie risultano visti, viene mostrata l'icona piena `checkmark-circle` in verde (`colors.completed`); negli altri casi viene mostrata `checkmark-circle-outline`.
+- Il controllo della completezza esclude le stagioni speciali (`season_number === 0`).
+
+### Posizione dello stato TMDB
+
+- È stato spostato lo stato editoriale della serie restituito da TMDB (`details.status`) dalla sezione sotto la trama alla posizione immediatamente sotto la barra di progresso generale.
+- Lo stato viene visualizzato allineato a sinistra, mantenendo il conteggio degli episodi visti sul totale già gestito dal componente `SeriesProgressBar`.
+- Lo stato TMDB rimane distinto dallo stato personale di visione (`watch_status`).
+
+### Da verificare
+
+- Testare le opzioni del menu contestuale per Preferiti, liste e rewatch.
+- Verificare i messaggi di conferma e le azioni di interruzione/ripresa della visione.
+- Controllare la disponibilità delle opzioni di rewatch con stagioni completamente riviste e con episodi ancora da rivedere.
+- Verificare visivamente l'icona generale e la posizione dello stato TMDB nella schermata dettagli serie.
+
+---
+
+## Lavori del 2 novembre 2026
+
+### Tracking degli episodi
+
+- È stata aggiunta in `src/database/index.ts` la funzione `getEpisodeWatchInfo`, che recupera lo stato della prima visione (`is_watched`) e la relativa data (`watched_at`) tramite serie, stagione ed episodio.
+- Nella schermata `src/app/details/episode/[id].tsx` è stato implementato il caricamento dello stato di visione e del numero di rewatch.
+- Il tracking dell'episodio utilizza le funzioni database già esistenti, evitando di duplicare la logica di registrazione delle visioni.
+
+### Salvataggio automatico di serie ed episodi
+
+- È stata aggiunta la funzione `ensureEpisodeSaved`, richiamata esclusivamente quando si registra una visione dalla schermata dettaglio episodio.
+- All'apertura della schermata vengono recuperati i dati da TMDB e verificato lo stato locale, senza effettuare inserimenti nel database.
+- Quando si registra una prima visione, viene verificata la presenza dell'episodio tramite TMDB ID.
+- Se l'episodio è già presente, viene utilizzato il record esistente senza effettuare nuovi inserimenti.
+- Se l'episodio non è presente, viene verificata la presenza della serie:
+  - Se la serie manca, viene prima recuperata da TMDB, insieme agli ID esterni TVDB e IMDb, e salvata nel database.
+  - Successivamente vengono recuperati e salvati gli episodi della stagione.
+- Il salvataggio automatico nel catalogo locale non comporta l'aggiunta della serie ai Preferiti o alle liste.
+- La registrazione di un rewatch utilizza l'episodio già salvato e aggiunge esclusivamente una nuova voce nello storico delle visioni.
+
+### Registrazione delle visioni
+
+- È stata implementata `handleWatchDate`, che gestisce sia la prima visione sia i rewatch.
+- La prima visione viene registrata tramite `markEpisodeWatched`.
+- Le visioni successive vengono registrate tramite `addEpisodeRewatch`.
+- Dopo ogni operazione vengono aggiornati lo stato di visione, la data della prima visione e il conteggio dei rewatch.
+- È stata aggiunta la gestione degli errori durante il salvataggio.
+
+### Scelta della data di visione
+
+- Sono state aggiunte le opzioni per registrare una visione:
+  - Oggi.
+  - Ieri.
+  - Data di uscita dell'episodio.
+  - Data e ora personalizzate tramite selettore Android.
+- È stato mantenuto il controllo che impedisce di registrare date future.
+- La data di uscita viene ricavata da `episode.air_date`.
+
+### Gestione delle visioni esistenti
+
+- Sono state collegate le azioni per:
+  - Segnare un episodio come non visto.
+  - Registrare un rewatch.
+  - Azzerare tutti i rewatch.
+  - Rimuovere l'ultimo rewatch.
+- Sono state aggiunte le richieste di conferma per le operazioni di eliminazione.
+- È stata implementata la funzione `refreshEpisodeTracking` per aggiornare i dati dopo ogni modifica.
+
+### Interfaccia della schermata episodio
+
+- È stata aggiunta la spunta per registrare o gestire la visione.
+- La spunta diventa verde quando l'episodio risulta visto.
+- In presenza di rewatch viene visualizzato il numero totale di visioni nel formato `×N`, contando anche la prima visione.
+- È stata aggiunta l'indicazione della data e dell'ora della prima visione.
+- Sono stati integrati `WatchedActionSheet` e `WatchedDateSheet` tramite `BottomSheetModal`.
+- È stato collegato il passaggio tra menu delle azioni e menu di scelta della data.
+
+### Da verificare
+
+- Verificare la registrazione della prima visione su un episodio non ancora presente nel database.
+- Verificare il comportamento quando la serie è già salvata e quando deve essere aggiunta automaticamente.
+- Verificare che il salvataggio automatico non modifichi Preferiti e liste.
+- Testare tutte le opzioni di scelta della data.
+- Verificare rewatch
+
+# Lavori del 3 novembre 2026
+
+### Navigazione tra gli episodi
+
+- È stata completata e verificata la navigazione tramite swipe tra episodio precedente, episodio corrente ed episodio successivo.
+- È stata corretta la gestione dei figli di `PagerView`, evitando di passare elementi `null` o `false` quando non sono disponibili episodi adiacenti.
+- Le pagine del pager mantengono le rispettive copertine, le informazioni dell'episodio e gli indicatori di navigazione.
+- Il passaggio a un altro episodio utilizza `router.replace`, aggiornando i parametri della schermata senza accumulare nuove pagine nella cronologia di navigazione.
+
+### Caricamento dei dettagli dell'episodio
+
+- È stato aggiornato il `useEffect` responsabile del caricamento dei dettagli.
+- È stato introdotto il controllo della variabile `active` per ignorare i risultati delle richieste asincrone appartenenti a episodi non più visualizzati.
+- Il controllo viene applicato dopo le richieste TMDB e SQLite, evitando aggiornamenti obsoleti dello stato.
+- Sono state aggiornate le dipendenze del `useEffect` includendo `id`, `seriesId`, `seasonNumber` ed `episodeNumber`.
+- Le query SQLite per recuperare lo stato di visione e il numero di rewatch vengono eseguite in parallelo tramite `Promise.all`.
+- La navigazione tra episodi non comporta salvataggi automatici nel database.
+
+### Pulsante di collegamento alla serie
+
+- Il pulsante per raggiungere la schermata dettagli della serie è stato spostato dalla barra superiore alla sezione inferiore della copertina, immediatamente sopra il titolo dell'episodio.
+- È stato ridimensionato per renderlo meno ingombrante.
+- È stato aggiunto un bordo bianco, mantenendo il testo coerente con lo stile delle informazioni dell'episodio.
+- È stata impostata la larghezza adattiva tramite `alignSelf: "flex-start"`, in modo che il pulsante occupi soltanto lo spazio necessario al contenuto.
+- È stata mantenuta la navigazione alla schermata dettagli della serie tramite `router.push`.
+
+### Spaziatura delle informazioni
+
+- È stata aumentata la distanza tra gli indicatori di navigazione (puntini) e le informazioni dell'episodio, intervenendo sul margine inferiore del blocco informativo.
+
+TV Tracker – Riepilogo lavori del 4 novembre 2026
+Oggi abbiamo lavorato principalmente alla realizzazione e al miglioramento della schermata Home, organizzando i contenuti in tre sezioni e introducendo componenti riutilizzabili.
+1. Realizzazione della schermata Home
+Abbiamo definito e implementato tre sezioni:
+- Continua a guardare: visualizzazione verticale delle serie che si stanno seguendo, con informazioni sull'episodio successivo da guardare.
+- Inizia a guardare: visualizzazione orizzontale delle serie non ancora iniziate.
+- Da guardare più tardi: visualizzazione orizzontale delle serie salvate per una visione futura.
+I dati vengono recuperati dal database SQLite, utilizzando gli stati personali delle serie (watch_status).
+
+Per ogni serie vengono individuati gli episodi da mostrare, escludendo gli episodi speciali e selezionando il primo episodio non ancora visto.
+2. Componenti riutilizzabili
+Abbiamo lavorato su diversi componenti per rendere la Home più ordinata e riutilizzabile anche in altre schermate dell'app.
+HorizontalMediaList
+Componente realizzato per visualizzare liste orizzontali di contenuti.
+
+Gestisce:
+- Titolo della sezione.
+- Scorrimento orizzontale.
+- Spaziatura tra gli elementi.
+- Messaggio per le sezioni vuote.
+- Eventuale azione per visualizzare altri contenuti.
+- Indicatore delle pagine.
+Abbiamo scelto di utilizzare FlatList al posto di ScrollView, così da avere una gestione più appropriata delle liste.
+PagerIndicator
+Componente per indicare visivamente la posizione durante lo scorrimento delle liste orizzontali.
+- Mostra indicatori circolari.
+- Evidenzia la pagina attualmente selezionata.
+- Utilizza i colori del tema globale.
+Abbiamo mantenuto il componente esistente, senza introdurre modifiche superflue.
+MediaCard
+Abbiamo riutilizzato il componente per visualizzare i contenuti multimediali, adattandone la struttura alle esigenze della Home.
+
+La scheda gestisce:
+- Copertina.
+- Titolo.
+- Informazioni aggiuntive.
+- Contenuto nella parte inferiore.
+- Eventuale azione aggiuntiva.
+Abbiamo inoltre separato l'area cliccabile della scheda dall'azione aggiuntiva, evitando di annidare elementi Pressable.
+mediaLayout.ts
+Abbiamo mantenuto il sistema di dimensionamento già presente, senza modificarne inutilmente le impostazioni.
+3. Integrazione dei componenti nella Home
+Abbiamo integrato i componenti secondo questa organizzazione:
+Sezione	Visualizzazione	Componenti
+Continua a guardare	Verticale	Elementi personalizzati con still dell'episodio
+Inizia a guardare	Orizzontale	HorizontalMediaList + MediaCard
+Da guardare più tardi	Orizzontale	HorizontalMediaList + MediaCard
+
+Per le due sezioni orizzontali abbiamo anche sistemato la posizione del pulsante per segnare un episodio come visto: deve comparire accanto alle informazioni dell'episodio, senza aumentare l'altezza della scheda.
+4. Collegamento con il database
+Abbiamo integrato la schermata con le funzioni SQLite per recuperare e aggiornare i contenuti.
+
+Le operazioni principali comprendono:
+- Recupero delle serie in corso.
+- Recupero delle serie non ancora iniziate.
+- Recupero delle serie da guardare più tardi.
+- Individuazione del prossimo episodio non visto.
+- Registrazione della visione direttamente dalla Home.
+- Aggiornamento delle sezioni dopo aver segnato un episodio come visto.
+Abbiamo inoltre previsto il ricaricamento dei dati quando si torna sulla Home e tramite pull-to-refresh.
+5. Animazione della spunta
+Successivamente abbiamo aggiunto un feedback visivo quando si segna un episodio come visto.
+- La spunta aumenta temporaneamente di dimensione.
+- Il colore diventa verde, utilizzando colors.completed.
+- L'animazione viene realizzata con Animated di React Native, senza nuove dipendenze.
+È stato introdotto il componente HomeCheckButton.
+6. Dissolvenza dell'episodio
+Abbiamo aggiunto una seconda animazione:
+- Dopo la comparsa della spunta verde, l'elemento inizia a dissolversi.
+- L'opacità diminuisce gradualmente.
+- Al termine viene aggiornata la lista e l'episodio scompare dalla Home.
+Per questa funzionalità abbiamo introdotto AnimatedHomeItem.
+7. Nuovo ordinamento di Continua a guardare
+Abbiamo individuato un miglioramento ancora da applicare alla funzione getHomeSeriesByWatchStatus().
+
+L'obiettivo è:
+- Continua a guardare: ordinamento in base alla data dell'ultima visione registrata, dalla più recente alla meno recente.
+- Inizia a guardare: mantiene l'ordinamento alfabetico.
+- Da guardare più tardi: mantiene l'ordinamento alfabetico.
+Il criterio proposto utilizza episodes.watched_at, con il titolo della serie come criterio secondario.
+
+
+Stato complessivo del lavoro
+Implementato
+ Struttura della Home, componenti riutilizzabili, collegamento SQLite e animazioni.
+
+
+Riepilogo delle modifiche 5/11/2026 – Sezione Home «Continua a guardare»
+Abbiamo modificato il comportamento di navigazione degli elementi nella sezione Continua a guardare, con l'obiettivo di aprire direttamente l'episodio anziché la serie.
+1. Recupero dell'ID TMDB dell'episodio
+La query getHomeSeriesByWatchStatus recuperava già le informazioni dell'episodio, ma non il suo ID TMDB.
+
+Abbiamo aggiunto alla SELECT:
+e.tmdb_id AS episode_tmdb_id,
+
+
+In questo modo distinguiamo:
+- tmdb_id: ID TMDB della serie.
+- episode_tmdb_id: ID TMDB dell'episodio.
+2. Aggiornamento del tipo HomeSeries
+Abbiamo aggiunto il nuovo campo:
+episode_tmdb_id: number;
+
+
+Il tipo contiene quindi anche l'identificativo necessario per aprire il dettaglio dell'episodio.
+3. Nuova funzione openEpisode
+Abbiamo previsto una funzione dedicata alla navigazione verso il dettaglio episodio:
+const openEpisode = (series: HomeSeries) => {
+  router.push({
+    pathname: "/details/episode/[id]",
+    params: {
+      id: String(series.episode_tmdb_id),
+      seriesId: String(series.tmdb_id),
+      seasonNumber: String(series.season_number),
+      episodeNumber: String(series.episode_number),
+    },
+  });
+};
+
+
+Vengono passati tutti i parametri necessari:
+- ID dell'episodio.
+- ID della serie.
+- Numero della stagione.
+- Numero dell'episodio.
+4. Modifica dell'interazione nella sezione
+Abbiamo modificato renderContinuingItem per separare le aree cliccabili.
+Elemento	Comportamento
+Immagine dell'episodio	Apre il dettaglio episodio
+Informazioni dell'episodio	Apre il dettaglio episodio
+Titolo della serie	Apre il dettaglio serie
+Pulsante di spunta	Segna l'episodio come visto
+
+5. Modifica grafica del titolo
+Il titolo della serie è stato trasformato in un elemento cliccabile con:
+- Bordo bianco sottile.
+- Angoli leggermente arrotondati.
+- Spaziatura interna contenuta.
+Lo stile riprende quello utilizzato nel dettaglio episodio, rendendo evidente che il titolo è un collegamento indipendente.
+
+Risultato desiderato: la sezione «Continua a guardare» permette di raggiungere direttamente l'episodio con un tocco, mantenendo comunque accessibile il dettaglio della serie attraverso il titolo.
+
+Riepilogo delle modifiche del 7 novembre 2026
+1. Home: aggiunta degli episodi ancora da vedere nella sezione Continua a guardare
+Abbiamo modificato il recupero dei dati delle serie per mostrare anche quanti episodi rimangono da guardare.
+
+In particolare:
+- Abbiamo modificato la query SQLite che recupera le serie per stato di visione.
+- Abbiamo aggiunto il campo remaining_episodes al tipo HomeSeries.
+- Il conteggio considera gli episodi non visti successivi all'episodio proposto, senza includere l'episodio stesso.
+- Abbiamo mantenuto il comportamento delle sezioni esistenti della Home.
+
+2. Home: creazione del Calendario
+Abbiamo introdotto il recupero degli episodi in uscita attraverso TMDB.
+
+Il funzionamento implementato prevede:
+- Considerare soltanto le serie salvate con watch_status continuing o not_started_yet.
+- Recuperare le informazioni aggiornate delle serie tramite getTvDetails.
+- Individuare il prossimo episodio attraverso next_episode_to_air.
+- Considerare soltanto gli episodi con data di uscita futura.
+- Limitare a 5 le richieste TMDB contemporanee.
+- Ordinare gli episodi per data di uscita.
+- Utilizzare una cache di 6 ore per evitare richieste ripetute.
+Abbiamo inoltre separato il caricamento del calendario da quello delle altre sezioni della Home: viene recuperato in background tramite useFocusEffect, senza rallentare il caricamento delle liste esistenti.
+3. Dettaglio serie: gestione degli episodi non ancora usciti
+Abbiamo modificato il comportamento degli episodi futuri.
+- Nel dettaglio serie non viene mostrata l'icona di spunta per gli episodi non ancora usciti.
+- Lo stesso comportamento è stato applicato al dettaglio episodio.
+- In questo modo non è possibile inserire una visione per un episodio che non è ancora disponibile.
+Abbiamo anche mantenuto la visualizzazione delle stagioni future e dei relativi episodi: devono continuare a essere visibili, anche se non ancora trasmessi.
+4. Ricalcolo dello stato della serie quando si modifica lo storico
+Abbiamo lavorato sulla sincronizzazione tra storico delle visioni e stato personale della serie.
+
+Il comportamento previsto e implementato è:
+Situazione	Stato della serie
+Tutti gli episodi disponibili sono visti	up_to_date
+Rimane almeno un episodio disponibile da vedere	continuing
+Nessun episodio risulta visto	not_started_yet
+
+In particolare, abbiamo corretto il caso in cui una serie fosse up_to_date e venisse rimossa una visione: lo stato deve essere ricalcolato e non rimanere erroneamente up_to_date.
+5. Completamento serie e barra di avanzamento
+Questa è stata una delle ultime modifiche importanti.
+
+Abbiamo introdotto getAvailableEpisodes, che recupera i dettagli delle stagioni da TMDB e individua gli episodi già trasmessi.
+
+La lista availableEpisodes viene utilizzata per:
+- Calcolare il numero totale di episodi da considerare.
+- Calcolare quanti episodi risultano effettivamente visti.
+- Determinare se la serie può essere considerata completata.
+- Gestire correttamente il contrassegno di completamento.
+Abbiamo corretto anche il calcolo della barra: prima utilizzava episode_count di TMDB e quindi comprendeva anche gli episodi futuri.
+
+Adesso il calcolo utilizza soltanto gli episodi già usciti.
+
+Abbiamo inoltre aggiunto il caricamento di availableEpisodes anche quando si salva una nuova serie con handleSaveSeries, evitando che la barra rimanga vuota fino alla riapertura del dettaglio.
+6. Dettaglio serie: ultime modifiche grafiche
+Infine abbiamo sistemato due dettagli:
+- Data di uscita degli episodi: ora viene visualizzata nel formato italiano GG/MM/AAAA, anziché AAAA-MM-GG.
+- Intestazione delle stagioni: abbiamo eliminato l'anno che compariva accanto al numero totale degli episodi.
+

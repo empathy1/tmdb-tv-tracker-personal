@@ -4,6 +4,7 @@ import type {
   TMDBMovieSearchResponse,
   TMDBMovieSearchResult,
   TMDBTvDetails,
+  TMDBTvEpisode,
   TMDBTvSearchResponse,
   TMDBTvSearchResult,
   TMDBTvSeasonDetails,
@@ -263,6 +264,20 @@ export async function getTvSeasonDetails(
   return tmdbFetch<TMDBTvSeasonDetails>(`/tv/${tvId}/season/${seasonNumber}`, {
     language,
   });
+}
+
+export async function getTvEpisodeDetails(
+  tvId: number,
+  seasonNumber: number,
+  episodeNumber: number,
+  titleLanguage: TitleLanguage = "it",
+): Promise<TMDBTvEpisode> {
+  const language = getTMDBLanguage(titleLanguage) ?? "en-US";
+
+  return tmdbFetch<TMDBTvEpisode>(
+    `/tv/${tvId}/season/${seasonNumber}/episode/${episodeNumber}`,
+    { language },
+  );
 }
 
 type TMDBTvExternalIds = {

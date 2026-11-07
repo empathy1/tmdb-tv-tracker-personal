@@ -235,6 +235,103 @@ export async function getSavedEpisodeNumbers(
   );
 }
 
+async function getHomeSeriesByWatchStatus(
+  watchStatus: string,
+): Promise<HomeSeries[]> {
+  const db = await getDatabase();
+
+  return db.getAllAsync<HomeSeries>(
+    `SELECT
+       s.tmdb_id,
+       e.tmdb_id AS episode_tmdb_id,
+       (
+        SELECT COUNT(*)
+        FROM episodes remaining
+        WHERE remaining.series_tmdb_id = s.tmdb_id
+          AND remaining.is_special = 0
+          AND remaining.is_watched = 0
+          AND NOT (
+            remaining.season_number = e.season_number
+            AND remaining.episode_number = e.episode_number
+          )
+       ) AS remaining_episodes,
+       s.title,
+       s.poster_path,
+       s.backdrop_path,
+       s.overview,
+       s.first_air_date,
+       e.season_number,
+       e.episode_number,
+       e.title AS episode_title,
+       e.still_path,
+       e.air_date
+     FROM series s
+     JOIN episodes e
+       ON e.series_tmdb_id = s.tmdb_id
+     WHERE s.watch_status = ?
+       AND e.is_special = 0
+       AND e.is_watched = 0
+       AND NOT EXISTS (
+         SELECT 1
+         FROM episodes previous
+         WHERE previous.series_tmdb_id = e.series_tmdb_id
+           AND previous.is_special = 0
+           AND previous.is_watched = 0
+           AND (
+             previous.season_number < e.season_number
+             OR (
+               previous.season_number = e.season_number
+               AND previous.episode_number < e.episode_number
+             )
+           )
+       )
+     ORDER BY
+  CASE
+    WHEN s.watch_status = 'continuing' THEN (
+      SELECT MAX(watched_episode.watched_at)
+      FROM episodes watched_episode
+      WHERE watched_episode.series_tmdb_id = s.tmdb_id
+        AND watched_episode.is_special = 0
+        AND watched_episode.is_watched = 1
+    )
+  END DESC,
+  s.title COLLATE NOCASE`,
+    watchStatus,
+  );
+}
+
+export function getContinuingSeries(): Promise<HomeSeries[]> {
+  return getHomeSeriesByWatchStatus("continuing");
+}
+
+export function getNotStartedSeries(): Promise<HomeSeries[]> {
+  return getHomeSeriesByWatchStatus("not_started_yet");
+}
+
+export function getWatchLaterSeries(): Promise<HomeSeries[]> {
+  return getHomeSeriesByWatchStatus("watch_later");
+}
+
+export type CalendarSeries = {
+  tmdb_id: number;
+  title: string;
+  poster_path: string | null;
+};
+
+export async function getCalendarSeries(): Promise<CalendarSeries[]> {
+  const db = await getDatabase();
+
+  return db.getAllAsync<CalendarSeries>(
+    `SELECT
+       tmdb_id,
+       title,
+       poster_path
+     FROM series
+     WHERE watch_status IN ('continuing', 'not_started_yet')
+     ORDER BY title COLLATE NOCASE`,
+  );
+}
+
 export async function isMovieSaved(tmdbId: number): Promise<boolean> {
   const db = await getDatabase();
 
@@ -1006,4 +1103,114 @@ export async function deleteMovieRewatch(rewatchId: number): Promise<void> {
        AND movie_tmdb_id IS NOT NULL`,
     rewatchId,
   );
+}
+
+export type SavedEpisode = {
+  id: number;
+  series_tmdb_id: number;
+  season_number: number;
+  episode_number: number;
+  title: string | null;
+  is_watched: number;
+  watched_at: string | null;
+  rewatch_count: number;
+  is_special: number;
+  tmdb_id: number | null;
+  overview: string | null;
+  air_date: string | null;
+  still_path: string | null;
+};
+
+export type HomeWatchStatus = "continuing" | "not_started_yet" | "watch_later";
+
+export type HomeSeries = {
+  tmdb_id: number;
+  episode_tmdb_id: number;
+  title: string;
+  poster_path: string | null;
+  backdrop_path: string | null;
+  overview: string | null;
+  first_air_date: string | null;
+  season_number: number;
+  episode_number: number;
+  episode_title: string | null;
+  still_path: string | null;
+  air_date: string | null;
+  remaining_episodes: number;
+};
+
+export async function getEpisodeByTmdbId(
+  episodeTmdbId: number,
+): Promise<SavedEpisode | null> {
+  const db = await getDatabase();
+
+  return db.getFirstAsync<SavedEpisode>(
+    `SELECT *
+     FROM episodes
+     WHERE tmdb_id = ?`,
+    [episodeTmdbId],
+  );
+}
+
+export async function getEpisodeWatchInfo(
+  seriesTmdbId: number,
+  seasonNumber: number,
+  episodeNumber: number,
+): Promise<{
+  is_watched: number;
+  watched_at: string | null;
+} | null> {
+  const db = await getDatabase();
+
+  return db.getFirstAsync(
+    `SELECT is_watched, watched_at
+     FROM episodes
+     WHERE series_tmdb_id = ?
+       AND season_number = ?
+       AND episode_number = ?
+     LIMIT 1`,
+    seriesTmdbId,
+    seasonNumber,
+    episodeNumber,
+  );
+}
+
+/**
+ * Registra la visione di un episodio dalla Home.
+ * Se la serie non è già in visione, aggiorna
+ * il suo stato personale a "continuing".
+ */
+export async function markHomeEpisodeWatched(
+  seriesTmdbId: number,
+  seasonNumber: number,
+  episodeNumber: number,
+  currentWatchStatus: HomeWatchStatus,
+  watchedAt: string = new Date().toISOString(),
+): Promise<void> {
+  const db = await getDatabase();
+
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `UPDATE episodes
+       SET is_watched = 1,
+           watched_at = ?
+       WHERE series_tmdb_id = ?
+         AND season_number = ?
+         AND episode_number = ?
+         AND is_special = 0`,
+      watchedAt,
+      seriesTmdbId,
+      seasonNumber,
+      episodeNumber,
+    );
+
+    if (currentWatchStatus !== "continuing") {
+      await db.runAsync(
+        `UPDATE series
+         SET watch_status = 'continuing'
+         WHERE tmdb_id = ?`,
+        seriesTmdbId,
+      );
+    }
+  });
 }

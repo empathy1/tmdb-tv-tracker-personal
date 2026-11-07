@@ -4,8 +4,13 @@ import {
   TMDB_IMAGE_BASE_URL,
 } from "@/services/tmdb";
 import { Ionicons } from "@expo/vector-icons";
-import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import {
+  Stack,
+  useFocusEffect,
+  useLocalSearchParams,
+  useRouter,
+} from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   ActivityIndicator,
@@ -163,6 +168,45 @@ export default function MovieDetails() {
 
     loadDetails();
   }, [id]);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+
+      async function refreshMovieTracking() {
+        try {
+          const movieId = Number(id);
+
+          if (!Number.isFinite(movieId) || movieId <= 0) {
+            return;
+          }
+
+          const alreadySaved = await isMovieSaved(movieId);
+
+          if (!active) return;
+
+          setIsSaved(alreadySaved);
+
+          if (alreadySaved) {
+            await loadMovieTracking(movieId);
+          } else {
+            setIsFavorite(false);
+            setIsWatched(false);
+            setWatchedAt(null);
+            setRewatchCount(0);
+          }
+        } catch (error) {
+          console.error("Errore aggiornando lo stato del film:", error);
+        }
+      }
+
+      void refreshMovieTracking();
+
+      return () => {
+        active = false;
+      };
+    }, [id]),
+  );
 
   async function handleSaveMovie() {
     if (saving) return;
@@ -444,10 +488,10 @@ export default function MovieDetails() {
   }
 
   function handleViewRewatches() {
-    Alert.alert(
-      "Rewatch",
-      "La consultazione dei rewatch dei film sarà disponibile in seguito.",
-    );
+    router.push({
+      pathname: "../rewatches/movies/[id]",
+      params: { id: String(id) },
+    });
   }
 
   const hasRewatch = rewatchCount > 0;

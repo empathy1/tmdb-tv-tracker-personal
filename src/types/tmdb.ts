@@ -34,7 +34,6 @@ export type TMDBMovieSearchResponse = {
   total_results: number;
 };
 
-
 export type TMDBTvDetails = {
   id: number;
   name: string;
@@ -53,6 +52,14 @@ export type TMDBTvDetails = {
     id: number;
     name: string;
   }[];
+  next_episode_to_air: {
+    id: number;
+    name: string;
+    air_date: string;
+    episode_number: number;
+    season_number: number;
+    still_path: string | null;
+  } | null;
 };
 
 export type TMDBMovieDetails = {
@@ -73,9 +80,7 @@ export type TMDBMovieDetails = {
   }[];
 };
 
-
 export type TitleLanguage = "it" | "en" | "original";
-
 
 export type TMDBTvSeasonSummary = {
   id: number;
