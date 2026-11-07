@@ -939,6 +939,31 @@ export type MovieWatchInfo = {
   watched_at: string | null;
 };
 
+export type HomeMovie = {
+  tmdb_id: number;
+  title: string;
+  poster_path: string | null;
+  release_date: string | null;
+};
+
+export async function getNotWatchedMovies(): Promise<HomeMovie[]> {
+  const db = await getDatabase();
+
+  return db.getAllAsync<HomeMovie>(
+    `SELECT
+       tmdb_id,
+       title,
+       poster_path,
+       release_date
+     FROM movies
+     WHERE is_watched = 0
+     ORDER BY
+       CASE WHEN release_date IS NULL OR release_date = '' THEN 1 ELSE 0 END,
+       release_date,
+       title COLLATE NOCASE`,
+  );
+}
+
 /**
  * Recupera lo stato della prima visione del film.
  */

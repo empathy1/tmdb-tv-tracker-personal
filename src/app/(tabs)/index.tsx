@@ -17,13 +17,15 @@ import {
   getCalendarSeries,
   getContinuingSeries,
   getNotStartedSeries,
+  getNotWatchedMovies,
   getWatchLaterSeries,
   markHomeEpisodeWatched,
+  markMovieWatched,
 } from "@/database";
 
 import { getCalendarCache, setCalendarCache } from "@/services/calendarCache";
 
-import type { HomeSeries, HomeWatchStatus } from "@/database";
+import type { HomeMovie, HomeSeries, HomeWatchStatus } from "@/database";
 
 import HorizontalMediaList from "@/components/HorizontalMediaList";
 import MediaCard from "@/components/MediaCard";
@@ -48,6 +50,7 @@ type HomeListsData = {
   continuing: HomeSeries[];
   notStarted: HomeSeries[];
   watchLater: HomeSeries[];
+  movies: HomeMovie[];
 };
 
 type HomeData = HomeListsData & {
@@ -59,6 +62,7 @@ const initialData: HomeData = {
   notStarted: [],
   watchLater: [],
   calendar: [],
+  movies: [],
 };
 
 const CALENDAR_CACHE_DURATION = 6 * 60 * 60 * 1000;
@@ -90,6 +94,7 @@ type HomeCheckButtonProps = {
   success: boolean;
   disabled: boolean;
   onPress: () => void;
+  accessibilityLabel?: string;
 };
 
 function HomeCheckButton({
@@ -97,6 +102,7 @@ function HomeCheckButton({
   success,
   disabled,
   onPress,
+  accessibilityLabel = "Segna l'episodio come visto",
 }: HomeCheckButtonProps) {
   const scale = useRef(new Animated.Value(1)).current;
 
@@ -117,7 +123,7 @@ function HomeCheckButton({
     <Pressable
       hitSlop={10}
       accessibilityRole="button"
-      accessibilityLabel="Segna l'episodio come visto"
+      accessibilityLabel={accessibilityLabel}
       disabled={disabled}
       onPress={onPress}
       style={{
@@ -181,17 +187,24 @@ export default function HomeScreen() {
   const [successEpisode, setSuccessEpisode] = useState<string | null>(null);
   const [fadingEpisode, setFadingEpisode] = useState<string | null>(null);
 
-  const fetchHomeData = useCallback(async (): Promise<HomeListsData> => {
-    const [continuing, notStarted, watchLater] = await Promise.all([
+  const [savingMovie, setSavingMovie] = useState<number | null>(null);
+  const [successMovie, setSuccessMovie] = useState<number | null>(null);
+  const [fadingMovie, setFadingMovie] = useState<number | null>(null);
+
+  const fetchHomeData = useCallback(async (): Promise<HomeData> => {
+    const [continuing, notStarted, watchLater, movies] = await Promise.all([
       getContinuingSeries(),
       getNotStartedSeries(),
       getWatchLaterSeries(),
+      getNotWatchedMovies(),
     ]);
 
     return {
       continuing,
       notStarted,
       watchLater,
+      movies,
+      calendar: [],
     };
   }, []);
 
@@ -333,6 +346,20 @@ export default function HomeScreen() {
     });
   };
 
+  const openMovie = (tmdbId: number) => {
+    router.push({
+      pathname: "/details/movie/[id]",
+      params: { id: String(tmdbId) },
+    });
+  };
+
+  const formatMovieReleaseDate = (date: string | null) => {
+    if (!date) return "Data di uscita sconosciuta";
+
+    const [year, month, day] = date.split("-");
+    return `${day}/${month}/${year}`;
+  };
+
   const handleMarkWatched = async (
     series: HomeSeries,
     watchStatus: HomeWatchStatus,
@@ -376,6 +403,44 @@ export default function HomeScreen() {
       setSuccessEpisode(null);
       setFadingEpisode(null);
       setSavingEpisode(null);
+    }
+  };
+
+  const handleMarkMovieWatched = async (movie: HomeMovie) => {
+    const movieId = movie.tmdb_id;
+
+    if (savingMovie !== null) {
+      return;
+    }
+
+    setSavingMovie(movieId);
+
+    try {
+      await markMovieWatched(movieId);
+
+      // Animazione della spunta.
+      setSuccessMovie(movieId);
+
+      await new Promise<void>((resolve) => setTimeout(resolve, 650));
+
+      // Dissolvenza della card.
+      setFadingMovie(movieId);
+
+      await new Promise<void>((resolve) => setTimeout(resolve, 300));
+
+      // Aggiornamento delle liste.
+      await loadHomeData();
+    } catch (error) {
+      console.error("Errore registrazione visione film:", error);
+
+      Alert.alert(
+        "Errore",
+        "Non è stato possibile registrare la visione del film.",
+      );
+    } finally {
+      setSuccessMovie(null);
+      setFadingMovie(null);
+      setSavingMovie(null);
     }
   };
 
@@ -594,6 +659,46 @@ export default function HomeScreen() {
     );
   };
 
+  const renderMovieItem = (movie: HomeMovie) => {
+    const movieId = movie.tmdb_id;
+
+    return (
+      <AnimatedHomeItem fading={fadingMovie === movieId}>
+        <MediaCard
+          title={movie.title}
+          poster={
+            movie.poster_path
+              ? `${TMDB_IMAGE_BASE_URL}${movie.poster_path}`
+              : null
+          }
+          horizontal
+          onPress={() => openMovie(movieId)}
+          info={
+            <Text
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              style={{
+                color: colors.textSecondary,
+                fontSize: 12,
+              }}
+            >
+              {formatMovieReleaseDate(movie.release_date)}
+            </Text>
+          }
+          action={
+            <HomeCheckButton
+              loading={savingMovie === movieId}
+              success={successMovie === movieId}
+              disabled={savingMovie !== null}
+              onPress={() => handleMarkMovieWatched(movie)}
+              accessibilityLabel="Segna il film come visto"
+            />
+          }
+        />
+      </AnimatedHomeItem>
+    );
+  };
+
   const renderSection = (
     title: string,
     items: HomeSeries[],
@@ -680,10 +785,20 @@ export default function HomeScreen() {
         />
       )}
 
+      {data.movies.length > 0 && (
+        <HorizontalMediaList<HomeMovie>
+          title="Film da guardare"
+          data={data.movies}
+          keyExtractor={(item) => String(item.tmdb_id)}
+          renderItem={({ item }) => renderMovieItem(item)}
+        />
+      )}
+
       {data.continuing.length === 0 &&
         data.notStarted.length === 0 &&
         data.watchLater.length === 0 &&
-        data.calendar.length === 0 && (
+        data.calendar.length === 0 &&
+        data.movies.length === 0 && (
           <Text style={globalStyles.empty}>
             Non ci sono serie da visualizzare.
           </Text>

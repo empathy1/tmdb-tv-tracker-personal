@@ -970,3 +970,82 @@ Infine abbiamo sistemato due dettagli:
 - Data di uscita degli episodi: ora viene visualizzata nel formato italiano GG/MM/AAAA, anziché AAAA-MM-GG.
 - Intestazione delle stagioni: abbiamo eliminato l'anno che compariva accanto al numero totale degli episodi.
 
+Riepilogo – Sezione “Film da iniziare” nella Home 7 novembre 2026
+Abbiamo completato l'integrazione di una nuova sezione dedicata ai film salvati ma non ancora visti.
+1. Database (src/database/index.ts)
+Abbiamo aggiunto il tipo:
+export type HomeMovie = {
+  tmdb_id: number;
+  title: string;
+  poster_path: string | null;
+  release_date: string | null;
+};
+
+
+E la funzione:
+getNotWatchedMovies()
+
+
+Questa funzione:
+- Recupera i film dalla tabella movies.
+- Seleziona soltanto quelli con is_watched = 0.
+- Restituisce ID TMDB, titolo, poster e data di uscita.
+- Ordina i film per data di uscita, mettendo quelli senza data alla fine.
+Non effettua chiamate aggiuntive a TMDB.
+2. Caricamento dati Home (src/app/(tabs)/index.tsx)
+Abbiamo:
+- Importato getNotWatchedMovies, markMovieWatched e HomeMovie.
+- Aggiunto movies a HomeListsData.
+- Inizializzato movies: [] in initialData.
+- Integrato getNotWatchedMovies() in fetchHomeData, insieme alle altre richieste tramite Promise.all.
+- Mantenuto calendar: [] nel risultato, perché il calendario viene caricato separatamente.
+3. Navigazione verso il dettaglio
+Abbiamo aggiunto:
+const openMovie = (tmdbId: number) => {
+  router.push({
+    pathname: "/details/movie/[id]",
+    params: { id: String(tmdbId) },
+  });
+};
+
+
+Toccando la scheda si apre direttamente il dettaglio del film.
+4. Visualizzazione della scheda
+Abbiamo creato renderMovieItem, riutilizzando:
+- MediaCard per il layout.
+- TMDB_IMAGE_BASE_URL per il poster.
+- formatMovieReleaseDate per mostrare la data nel formato italiano GG/MM/AAAA.
+- openMovie per aprire il dettaglio.
+- HomeCheckButton per la spunta.
+Abbiamo anche aggiunto numberOfLines={1} e adjustsFontSizeToFit alla data per evitare che vada a capo.
+5. Registrazione del film come visto
+Abbiamo creato tre nuovi stati:
+savingMovie
+successMovie
+fadingMovie
+
+
+E la funzione:
+handleMarkMovieWatched()
+
+
+Il comportamento è:
+1. Registra il film come visto tramite markMovieWatched().
+2. Anima la spunta.
+3. Applica una dissolvenza alla scheda.
+4. Ricarica i dati della Home.
+5. Il film scompare dalla sezione perché non è più considerato da iniziare.
+6. Riutilizzo delle animazioni
+Abbiamo modificato HomeCheckButton aggiungendo la proprietà opzionale accessibilityLabel.
+
+Questo permette di riutilizzare lo stesso componente sia per gli episodi sia per i film, senza modificare il comportamento precedente.
+
+Anche AnimatedHomeItem viene riutilizzato per la dissolvenza.
+7. Posizione della sezione
+Abbiamo inserito Film da iniziare immediatamente sotto Calendario.
+
+La sezione viene visualizzata soltanto se esistono film non ancora visti.
+
+Abbiamo inoltre aggiornato la condizione dello stato vuoto della Home, includendo anche data.movies.
+
+
