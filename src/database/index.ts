@@ -1239,3 +1239,412 @@ export async function markHomeEpisodeWatched(
     }
   });
 }
+
+export type HubSettings = {
+  name: string | null;
+  hub_poster: string | null;
+  avatar: string | null;
+};
+
+export async function getHubSettings(): Promise<HubSettings | null> {
+  const db = await getDatabase();
+
+  return db.getFirstAsync<HubSettings>(
+    `SELECT name, hub_poster, avatar
+     FROM hub_settings
+     ORDER BY id ASC
+     LIMIT 1`,
+  );
+}
+
+export async function saveHubSettings(settings: HubSettings): Promise<void> {
+  const db = await getDatabase();
+
+  const existing = await getHubSettings();
+
+  if (existing) {
+    await db.runAsync(
+      `UPDATE hub_settings
+       SET name = ?, hub_poster = ?, avatar = ?
+       WHERE id = (
+         SELECT id FROM hub_settings ORDER BY id ASC LIMIT 1
+       )`,
+      settings.name,
+      settings.hub_poster,
+      settings.avatar,
+    );
+  } else {
+    await db.runAsync(
+      `INSERT INTO hub_settings (name, hub_poster, avatar)
+       VALUES (?, ?, ?)`,
+      settings.name,
+      settings.hub_poster,
+      settings.avatar,
+    );
+  }
+}
+
+export type HubFavoriteSeries = {
+  tmdb_id: number;
+  title: string;
+  poster_path: string | null;
+  backdrop_path: string | null;
+  overview: string | null;
+  first_air_date: string | null;
+  status: string | null;
+  watch_status: string | null;
+  favorite_date: string | null;
+};
+
+export type HubFavoriteMovie = {
+  tmdb_id: number;
+  title: string;
+  poster_path: string | null;
+  backdrop_path: string | null;
+  overview: string | null;
+  release_date: string | null;
+  is_watched: number;
+  favorite_date: string | null;
+};
+
+export async function getFavoriteSeries(): Promise<HubFavoriteSeries[]> {
+  const db = await getDatabase();
+
+  return db.getAllAsync<HubFavoriteSeries>(
+    `SELECT
+       s.tmdb_id,
+       s.title,
+       s.poster_path,
+       s.backdrop_path,
+       s.overview,
+       s.first_air_date,
+       s.status,
+       s.watch_status,
+       p.favorite_date
+     FROM preferiti p
+     INNER JOIN series s ON s.tmdb_id = p.series_tmdb_id
+     WHERE p.item_type = 'series'
+     ORDER BY p.favorite_date DESC`,
+  );
+}
+
+export async function getFavoriteMovies(): Promise<HubFavoriteMovie[]> {
+  const db = await getDatabase();
+
+  return db.getAllAsync<HubFavoriteMovie>(
+    `SELECT
+       m.tmdb_id,
+       m.title,
+       m.poster_path,
+       m.backdrop_path,
+       m.overview,
+       m.release_date,
+       m.is_watched,
+       p.favorite_date
+     FROM preferiti p
+     INNER JOIN movies m ON m.tmdb_id = p.movie_tmdb_id
+     WHERE p.item_type = 'movie'
+     ORDER BY p.favorite_date DESC`,
+  );
+}
+
+export type HubHistoryItem = {
+  media_type: "movie" | "episode";
+  tmdb_id: number | null;
+  title: string;
+  series_title: string | null;
+  poster_path: string | null;
+  still_path: string | null;
+  season_number: number | null;
+  episode_number: number | null;
+  watched_at: string;
+  watch_number: number;
+  series_tmdb_id: number | null;
+};
+
+export async function getWatchHistory(
+  limit: number = 20,
+): Promise<HubHistoryItem[]> {
+  const db = await getDatabase();
+
+  return db.getAllAsync<HubHistoryItem>(
+    `WITH all_views AS (
+      SELECT
+        'movie' AS media_type,
+        NULL AS series_tmdb_id,
+        NULL AS season_number,
+        NULL AS episode_number,
+        m.tmdb_id AS movie_tmdb_id,
+        m.tmdb_id AS tmdb_id,
+        m.watched_at AS watched_at,
+        0 AS event_order,
+        0 AS event_id
+      FROM movies m
+      WHERE m.is_watched = 1
+        AND m.watched_at IS NOT NULL
+
+      UNION ALL
+
+      SELECT
+        'movie',
+        NULL,
+        NULL,
+        NULL,
+        r.movie_tmdb_id,
+        r.movie_tmdb_id,
+        r.watched_at,
+        1,
+        r.id
+      FROM rewatch r
+      WHERE r.item_type = 'movie'
+
+      UNION ALL
+
+      SELECT
+        'episode',
+        e.series_tmdb_id,
+        e.season_number,
+        e.episode_number,
+        NULL,
+        e.tmdb_id,
+        e.watched_at,
+        0,
+        0
+      FROM episodes e
+      WHERE e.is_watched = 1
+        AND e.watched_at IS NOT NULL
+
+      UNION ALL
+
+      SELECT
+        'episode',
+        r.series_tmdb_id,
+        r.season_number,
+        r.episode_number,
+        NULL,
+        r.episode_tmdb_id,
+        r.watched_at,
+        1,
+        r.id
+      FROM rewatch r
+      WHERE r.item_type = 'episode'
+    ),
+    numbered_views AS (
+      SELECT *,
+        ROW_NUMBER() OVER (
+          PARTITION BY
+            media_type,
+            series_tmdb_id,
+            season_number,
+            episode_number,
+            movie_tmdb_id
+          ORDER BY watched_at ASC, event_order ASC, event_id ASC
+        ) AS watch_number
+      FROM all_views
+    )
+    SELECT
+      v.media_type,
+      v.tmdb_id,
+      v.series_tmdb_id,
+      CASE
+        WHEN v.media_type = 'movie' THEN m.title
+        ELSE e.title
+      END AS title,
+      s.title AS series_title,
+      CASE
+        WHEN v.media_type = 'movie' THEN m.poster_path
+        ELSE s.poster_path
+      END AS poster_path,
+      e.still_path,
+      v.season_number,
+      v.episode_number,
+      v.watched_at,
+      v.watch_number
+    FROM numbered_views v
+    LEFT JOIN movies m
+      ON v.movie_tmdb_id = m.tmdb_id
+    LEFT JOIN episodes e
+      ON v.series_tmdb_id = e.series_tmdb_id
+      AND v.season_number = e.season_number
+      AND v.episode_number = e.episode_number
+    LEFT JOIN series s
+      ON v.series_tmdb_id = s.tmdb_id
+    ORDER BY v.watched_at DESC, v.event_order DESC, v.event_id DESC
+    LIMIT ?`,
+    limit,
+  );
+}
+
+export type HubStatistics = {
+  weeklyEpisodes: number;
+  weeklyDistinctEpisodes: number;
+  weeklyMovies: number;
+  weeklyDistinctMovies: number;
+  totalEpisodes: number;
+  totalDistinctEpisodes: number;
+  totalMovies: number;
+  totalDistinctMovies: number;
+  startedSeries: number;
+  completedSeries: number;
+};
+
+export async function getHubStatistics(): Promise<HubStatistics> {
+  const db = await getDatabase();
+
+  const result = await db.getFirstAsync<HubStatistics>(
+    `SELECT
+      (
+        SELECT COUNT(*) FROM episodes
+        WHERE is_watched = 1 AND watched_at IS NOT NULL
+          AND date(watched_at) >= date('now', 'localtime', 'weekday 0', '-6 days')
+          AND date(watched_at) < date('now', 'localtime', 'weekday 0', '+1 day')
+      ) +
+      (
+        SELECT COUNT(*) FROM rewatch
+        WHERE item_type = 'episode'
+          AND date(watched_at) >= date('now', 'localtime', 'weekday 0', '-6 days')
+          AND date(watched_at) < date('now', 'localtime', 'weekday 0', '+1 day')
+      ) AS weeklyEpisodes,
+
+      (
+        SELECT COUNT(DISTINCT series_tmdb_id || '-' || season_number || '-' || episode_number)
+        FROM episodes
+        WHERE is_watched = 1 AND watched_at IS NOT NULL
+          AND date(watched_at) >= date('now', 'localtime', 'weekday 0', '-6 days')
+          AND date(watched_at) < date('now', 'localtime', 'weekday 0', '+1 day')
+      ) AS weeklyDistinctEpisodes,
+
+      (
+        SELECT COUNT(*) FROM movies
+        WHERE is_watched = 1 AND watched_at IS NOT NULL
+          AND date(watched_at) >= date('now', 'localtime', 'weekday 0', '-6 days')
+          AND date(watched_at) < date('now', 'localtime', 'weekday 0', '+1 day')
+      ) +
+      (
+        SELECT COUNT(*) FROM rewatch
+        WHERE item_type = 'movie'
+          AND date(watched_at) >= date('now', 'localtime', 'weekday 0', '-6 days')
+          AND date(watched_at) < date('now', 'localtime', 'weekday 0', '+1 day')
+      ) AS weeklyMovies,
+
+      (
+        SELECT COUNT(DISTINCT movie_tmdb_id)
+        FROM (
+          SELECT tmdb_id AS movie_tmdb_id
+          FROM movies
+          WHERE is_watched = 1 AND watched_at IS NOT NULL
+            AND date(watched_at) >= date('now', 'localtime', 'weekday 0', '-6 days')
+            AND date(watched_at) < date('now', 'localtime', 'weekday 0', '+1 day')
+          UNION
+          SELECT movie_tmdb_id
+          FROM rewatch
+          WHERE item_type = 'movie'
+            AND date(watched_at) >= date('now', 'localtime', 'weekday 0', '-6 days')
+            AND date(watched_at) < date('now', 'localtime', 'weekday 0', '+1 day')
+        )
+      ) AS weeklyDistinctMovies,
+
+      (
+        SELECT COUNT(*) FROM episodes WHERE is_watched = 1
+      ) +
+      (
+        SELECT COUNT(*) FROM rewatch WHERE item_type = 'episode'
+      ) AS totalEpisodes,
+
+      (
+        SELECT COUNT(*) FROM episodes WHERE is_watched = 1
+      ) AS totalDistinctEpisodes,
+
+      (
+        SELECT COUNT(*) FROM movies WHERE is_watched = 1
+      ) +
+      (
+        SELECT COUNT(*) FROM rewatch WHERE item_type = 'movie'
+      ) AS totalMovies,
+
+      (
+        SELECT COUNT(*) FROM movies WHERE is_watched = 1
+      ) AS totalDistinctMovies,
+
+      (
+        SELECT COUNT(*) FROM series
+        WHERE watch_status IN ('continuing', 'up_to_date', 'stopped', 'completed')
+      ) AS startedSeries,
+
+      (
+        SELECT COUNT(*) FROM series
+        WHERE watch_status = 'completed'
+      ) AS completedSeries`,
+  );
+
+  return (
+    result ?? {
+      weeklyEpisodes: 0,
+      weeklyDistinctEpisodes: 0,
+      weeklyMovies: 0,
+      weeklyDistinctMovies: 0,
+      totalEpisodes: 0,
+      totalDistinctEpisodes: 0,
+      totalMovies: 0,
+      totalDistinctMovies: 0,
+      startedSeries: 0,
+      completedSeries: 0,
+    }
+  );
+}
+
+export type HubList = {
+  list_id: string;
+  name: string;
+  item_count: number;
+};
+
+export type HubListItem = {
+  item_type: "series" | "movie";
+  tmdb_id: number;
+  title: string;
+  poster_path: string | null;
+  backdrop_path: string | null;
+  added_at: string;
+  custom_order: number;
+};
+
+export async function getHubLists(): Promise<HubList[]> {
+  const db = await getDatabase();
+
+  return db.getAllAsync<HubList>(
+    `SELECT
+       el.list_id,
+       el.name,
+       COUNT(l.id) AS item_count
+     FROM elenco_liste el
+     LEFT JOIN liste l ON l.list_id = el.list_id
+     GROUP BY el.list_id, el.name
+     ORDER BY el.name COLLATE NOCASE ASC`,
+  );
+}
+
+export async function getHubListItems(listId: string): Promise<HubListItem[]> {
+  const db = await getDatabase();
+
+  return db.getAllAsync<HubListItem>(
+    `SELECT
+       l.item_type,
+       COALESCE(s.tmdb_id, m.tmdb_id) AS tmdb_id,
+       COALESCE(s.title, m.title, l.name) AS title,
+       COALESCE(s.poster_path, m.poster_path) AS poster_path,
+       COALESCE(s.backdrop_path, m.backdrop_path) AS backdrop_path,
+       l.added_at,
+       l.custom_order
+     FROM liste l
+     LEFT JOIN series s
+       ON l.item_type = 'series'
+       AND s.tmdb_id = l.series_tmdb_id
+     LEFT JOIN movies m
+       ON l.item_type = 'movie'
+       AND m.tmdb_id = l.movie_tmdb_id
+     WHERE l.list_id = ?
+     ORDER BY l.custom_order ASC, l.added_at DESC`,
+    listId,
+  );
+}

@@ -1048,4 +1048,83 @@ La sezione viene visualizzata soltanto se esistono film non ancora visti.
 
 Abbiamo inoltre aggiornato la condizione dello stato vuoto della Home, includendo anche data.movies.
 
+## Riepilogo del lavoro di oggi – 8 novembre 2026
+Oggi abbiamo lavorato principalmente su un'area del TV Tracker: sviluppo della schermata Hub.
+
+### 1. Preparazione del database per l'Hub
+Abbiamo verificato le tabelle e le funzioni necessarie per costruire la schermata Hub.
+
+Le tabelle coinvolte sono:
+- series
+- episodes
+- movies
+- rewatch
+- preferiti
+- liste
+- elenco_liste
+Abbiamo inoltre:
+- Creato manualmente la tabella hub_settings tramite DB Browser, con i campi name, hub_poster e avatar.
+- Verificato e predisposto le funzioni per recuperare le impostazioni del profilo.
+- Verificato le funzioni relative a cronologia, rewatch, preferiti, liste, statistiche ed esportazione.
+L'importazione e il ripristino del backup sono stati rimandati.
+
+### 2. Sviluppo della schermata Hub
+Abbiamo iniziato a trasformare il vecchio placeholder in una vera schermata Hub.
+
+La struttura che abbiamo concordato comprende:
+1. Profilo personale.
+2. Le mie liste.
+3. Cronologia delle visioni.
+4. Serie preferite.
+5. Film preferiti.
+6. Statistiche.
+7. Riconoscimenti TMDB.
+Per il profilo abbiamo impostato:
+- Copertina estesa a tutta la larghezza dello schermo.
+- Avatar.
+- Nome utente.
+Per le liste abbiamo stabilito di mantenere un carosello: ogni lista mostra inizialmente i poster dei primi quattro contenuti e permette di scorrere per visualizzare gli altri.
+
+### 3. Cronologia e preferiti
+Abbiamo iniziato a integrare i dati del database nell'Hub, riutilizzando i componenti esistenti HorizontalMediaList e MediaCard.
+
+Cronologia:
+- Lista orizzontale.
+- Supporto sia alle visioni normali sia alle visioni ripetute.
+- Indicatore visivo verde sulle schede: spunta per la prima visione e ×N per le visioni ripetute.
+- L'indicatore è puramente visivo, non cliccabile.
+Serie preferite:
+- Recupero dal database tramite getFavoriteSeries().
+- Visualizzazione nella relativa lista orizzontale.
+Film preferiti:
+- Recupero tramite getFavoriteMovies().
+- Verificato il salvataggio del film in movies prima dell'inserimento tra i preferiti.
+- Risolto un problema per cui i film non apparivano nell'Hub.
+
+### 4. Ultimo bug risolto oggi
+Il problema dei film preferiti non dipendeva dalla query SQL né dal salvataggio nel database.
+
+In loadHub mancava semplicemente questa istruzione:
+setFavoriteMovies(favoriteMoviesResult);
+
+
+Aggiungendola, lo stato React viene aggiornato correttamente e i film preferiti vengono visualizzati.
+
+Stato attuale del progetto
+Area	Stato
+Migrazione storico visioni	In corso, verifiche proseguite
+Gestione rewatch	Funzioni e visualizzazione integrate
+Profilo Hub	Base implementata
+Cronologia Hub	Integrata
+Serie preferite	Integrate
+Film preferiti	Integrati, bug risolto
+Carosello liste personali	Da integrare
+Statistiche	Da integrare
+Riconoscimenti TMDB	Da integrare
+Importazione backup	Rimandata
+
+In sintesi: oggi abbiamo completato una parte importante della migrazione dello storico e abbiamo trasformato l'Hub da schermata vuota a una schermata che inizia già a mostrare profilo, cronologia e preferiti.
+
+Il prossimo passo naturale sarà continuare con le liste personali, mantenendo il comportamento a carosello che abbiamo concordato.
+
 
