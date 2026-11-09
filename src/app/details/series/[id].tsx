@@ -907,7 +907,10 @@ export default function SeriesDetails() {
 
     if (allEpisodesWatched) {
       nextWatchStatus = "up_to_date";
-    } else if (savedWatchStatus === "up_to_date") {
+    } else if (
+      savedWatchStatus === "up_to_date" ||
+      savedWatchStatus === "continuing"
+    ) {
       nextWatchStatus = hasWatchedEpisodes ? "continuing" : "not_started_yet";
     } else if (
       hasWatchedEpisodes &&
@@ -1731,6 +1734,9 @@ export default function SeriesDetails() {
                   Stato: {details.status}
                 </Text>
               ) : null}
+              <Text style={globalStyles.caption}>
+                Stato visione: {watchStatus ?? "null"}
+              </Text>
 
               {details && (
                 <View>

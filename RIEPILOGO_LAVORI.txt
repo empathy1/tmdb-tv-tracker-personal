@@ -1127,4 +1127,66 @@ In sintesi: oggi abbiamo completato una parte importante della migrazione dello 
 
 Il prossimo passo naturale sarà continuare con le liste personali, mantenendo il comportamento a carosello che abbiamo concordato.
 
+Riepilogo del lavoro del 9/11/2026 – Statistiche
+Oggi abbiamo ampliato le statistiche della schermata Hub, rendendole più complete e distinguendo il numero totale di visioni da quello dei contenuti distinti.
+1. Conteggio delle visioni
+Abbiamo aggiornato getHubStatistics() in src/database/index.ts affinché i conteggi includano sia:
+- Le prime visioni, registrate nelle tabelle episodes e movies.
+- I rewatch, registrati nella tabella rewatch.
+Questo vale per:
+- Episodi visti.
+- Film visti.
+Di conseguenza, se guardi lo stesso episodio più volte, ogni visione viene conteggiata nel totale.
+2. Contenuti distinti
+Abbiamo aggiunto statistiche separate per contare quanti contenuti diversi sono stati visti, senza contare più volte lo stesso contenuto.
+
+Per gli episodi, identifichiamo un contenuto tramite serie, stagione ed episodio; per i film tramite TMDB ID.
+
+Abbiamo aggiunto queste proprietà a HubStatistics:
+- weeklyDistinctEpisodes
+- weeklyDistinctMovies
+- monthlyDistinctEpisodes
+- monthlyDistinctMovies
+- yearlyDistinctEpisodes
+- yearlyDistinctMovies
+Anche i rewatch vengono considerati nei conteggi distinti del rispettivo periodo, ma lo stesso episodio o film viene contato una sola volta.
+3. Statistiche per periodo
+Ora abbiamo i conteggi per tre intervalli temporali:
+Periodo	Episodi	Film
+Settimana	Totale e distinti	Totale e distinti
+Mese	Totale e distinti	Totale e distinti
+Anno	Totale e distinti	Totale e distinti
+
+I periodi vengono calcolati usando le date locali di SQLite.
+4. Statistiche complessive
+Abbiamo mantenuto separate le statistiche totali:
+- totalEpisodes: prime visioni e rewatch.
+- totalMovies: prime visioni e rewatch.
+- totalDistinctEpisodes: episodi effettivamente contrassegnati come visti, senza rewatch aggiuntivi.
+- totalDistinctMovies: film effettivamente contrassegnati come visti, senza rewatch aggiuntivi.
+Abbiamo deciso di non includere i rewatch nei totali distinti, perché non rappresentano nuovi contenuti.
+5. Interfaccia della schermata statistiche
+Abbiamo aggiornato PeriodStatCard per mostrare, per ogni periodo:
+- Numero totale di episodi visti.
+- Numero di episodi distinti.
+- Numero totale di film visti.
+- Numero di film distinti.
+L'obiettivo è rendere immediatamente visibile, ad esempio, una situazione come 4 visioni di episodi appartenenti a 2 episodi distinti.
+
+Abbiamo inoltre predisposto le card per settimana, mese e anno.
+
+Stato del lavoro
+Database aggiornato
+
+
+Tipi aggiornati
+
+
+Componente PeriodStatCard aggiornato
+
+
+Da verificare
+Rimane da completare/verificare l'ultimo passaggio: collegare le proprietà corrette alle tre card nel JSX e controllare i risultati direttamente nell'app.
+
+In sintesi: le statistiche ora distinguono quante volte hai guardato qualcosa da quanti contenuti diversi hai guardato, considerando anche i rewatch.
 

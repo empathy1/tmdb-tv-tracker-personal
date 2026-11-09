@@ -12,7 +12,7 @@ import * as Sharing from "expo-sharing";
 export const DATABASE_NAME = "tv_tracker.db";
 let databaseInstance: SQLite.SQLiteDatabase | null = null;
 
-async function getDatabase() {
+export async function getDatabase() {
   if (!databaseInstance) {
     databaseInstance = await SQLite.openDatabaseAsync(DATABASE_NAME);
   }
@@ -79,10 +79,12 @@ export async function saveMovieDetails(
       poster_path,
       backdrop_path,
       overview,
-      release_date
+      release_date,
+      runtime
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(tmdb_id) DO NOTHING`,
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(tmdb_id) DO UPDATE SET
+      runtime = COALESCE(excluded.runtime, movies.runtime)`,
     details.id,
     externalIds.imdb_id,
     details.title,
@@ -90,6 +92,7 @@ export async function saveMovieDetails(
     details.backdrop_path,
     details.overview,
     details.release_date || null,
+    details.runtime,
   );
 }
 
@@ -102,7 +105,7 @@ export async function saveTvSeasonEpisodes(
   await db.withTransactionAsync(async () => {
     for (const episode of season.episodes) {
       await db.runAsync(
-        `INSERT OR IGNORE INTO episodes (
+        `INSERT INTO episodes (
           series_tmdb_id,
           season_number,
           episode_number,
@@ -111,9 +114,13 @@ export async function saveTvSeasonEpisodes(
           overview,
           air_date,
           still_path,
-          is_special
+          is_special,
+          runtime
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(series_tmdb_id, season_number, episode_number)
+        DO UPDATE SET
+          runtime = COALESCE(excluded.runtime, episodes.runtime)`,
         seriesTmdbId,
         episode.season_number,
         episode.episode_number,
@@ -123,6 +130,7 @@ export async function saveTvSeasonEpisodes(
         episode.air_date,
         episode.still_path,
         episode.season_number === 0 ? 1 : 0,
+        episode.runtime,
       );
     }
   });
@@ -458,18 +466,32 @@ export async function markEpisodeWatched(
 ): Promise<void> {
   const db = await getDatabase();
 
-  await db.runAsync(
-    `UPDATE episodes
-     SET is_watched = 1,
-         watched_at = ?
-     WHERE series_tmdb_id = ?
-       AND season_number = ?
-       AND episode_number = ?`,
-    watchedAt,
-    seriesTmdbId,
-    seasonNumber,
-    episodeNumber,
-  );
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `UPDATE episodes
+       SET is_watched = 1,
+           watched_at = ?
+       WHERE series_tmdb_id = ?
+         AND season_number = ?
+         AND episode_number = ?`,
+      watchedAt,
+      seriesTmdbId,
+      seasonNumber,
+      episodeNumber,
+    );
+
+    await db.runAsync(
+      `UPDATE series
+       SET watch_status = 'continuing'
+       WHERE tmdb_id = ?
+         AND (
+           watch_status IS NULL OR
+           watch_status = 'not_started_yet' OR
+           watch_status = 'stopped'
+         )`,
+      seriesTmdbId,
+    );
+  });
 }
 
 /**
@@ -505,6 +527,39 @@ export async function markEpisodeUnwatched(
       seasonNumber,
       episodeNumber,
     );
+
+    const series = await db.getFirstAsync<{
+      watch_status: string | null;
+    }>(
+      `SELECT watch_status
+       FROM series
+       WHERE tmdb_id = ?`,
+      seriesTmdbId,
+    );
+
+    if (
+      series?.watch_status === "up_to_date" ||
+      series?.watch_status === "continuing"
+    ) {
+      const result = await db.getFirstAsync<{ total: number }>(
+        `SELECT COUNT(*) AS total
+         FROM episodes
+         WHERE series_tmdb_id = ?
+           AND is_watched = 1`,
+        seriesTmdbId,
+      );
+
+      const nextStatus =
+        (result?.total ?? 0) > 0 ? "continuing" : "not_started_yet";
+
+      await db.runAsync(
+        `UPDATE series
+         SET watch_status = ?
+         WHERE tmdb_id = ?`,
+        nextStatus,
+        seriesTmdbId,
+      );
+    }
   });
 }
 
@@ -518,17 +573,31 @@ export async function markSeasonWatched(
 ): Promise<void> {
   const db = await getDatabase();
 
-  await db.runAsync(
-    `UPDATE episodes
-     SET is_watched = 1,
-         watched_at = ?
-     WHERE series_tmdb_id = ?
-       AND season_number = ?
-       AND is_watched = 0`,
-    watchedAt,
-    seriesTmdbId,
-    seasonNumber,
-  );
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `UPDATE episodes
+       SET is_watched = 1,
+           watched_at = ?
+       WHERE series_tmdb_id = ?
+         AND season_number = ?
+         AND is_watched = 0`,
+      watchedAt,
+      seriesTmdbId,
+      seasonNumber,
+    );
+
+    await db.runAsync(
+      `UPDATE series
+       SET watch_status = 'continuing'
+       WHERE tmdb_id = ?
+         AND (
+           watch_status IS NULL OR
+           watch_status = 'not_started_yet' OR
+           watch_status = 'stopped'
+         )`,
+      seriesTmdbId,
+    );
+  });
 }
 
 /**
@@ -584,6 +653,39 @@ export async function markSeasonUnwatched(
       seriesTmdbId,
       seasonNumber,
     );
+
+    const series = await db.getFirstAsync<{
+      watch_status: string | null;
+    }>(
+      `SELECT watch_status
+       FROM series
+       WHERE tmdb_id = ?`,
+      seriesTmdbId,
+    );
+
+    if (
+      series?.watch_status === "up_to_date" ||
+      series?.watch_status === "continuing"
+    ) {
+      const result = await db.getFirstAsync<{ total: number }>(
+        `SELECT COUNT(*) AS total
+         FROM episodes
+         WHERE series_tmdb_id = ?
+           AND is_watched = 1`,
+        seriesTmdbId,
+      );
+
+      const nextStatus =
+        (result?.total ?? 0) > 0 ? "continuing" : "not_started_yet";
+
+      await db.runAsync(
+        `UPDATE series
+         SET watch_status = ?
+         WHERE tmdb_id = ?`,
+        nextStatus,
+        seriesTmdbId,
+      );
+    }
   });
 }
 
@@ -1480,12 +1582,49 @@ export type HubStatistics = {
   weeklyDistinctEpisodes: number;
   weeklyMovies: number;
   weeklyDistinctMovies: number;
+
+  monthlyEpisodes: number;
+  monthlyMovies: number;
+
+  yearlyEpisodes: number;
+  yearlyMovies: number;
+
   totalEpisodes: number;
   totalDistinctEpisodes: number;
   totalMovies: number;
   totalDistinctMovies: number;
+  totalSeriesWatched: number;
+
   startedSeries: number;
   completedSeries: number;
+
+  totalMinutes: number;
+  seriesFirstWatchMinutes: number;
+  movieFirstWatchMinutes: number;
+  seriesRewatchMinutes: number;
+  movieRewatchMinutes: number;
+  monthlyDistinctEpisodes: number;
+  monthlyDistinctMovies: number;
+  yearlyDistinctEpisodes: number;
+  yearlyDistinctMovies: number;
+};
+
+export type MostRewatchedMovie = {
+  tmdb_id: number;
+  title: string;
+  poster_path: string | null;
+  watch_count: number;
+};
+
+export type MostWatchedEpisode = {
+  tmdb_id: number | null;
+  series_tmdb_id: number;
+  series_title: string;
+  episode_title: string;
+  season_number: number;
+  episode_number: number;
+  poster_path: string | null;
+  watch_count: number;
 };
 
 export async function getHubStatistics(): Promise<HubStatistics> {
@@ -1507,12 +1646,23 @@ export async function getHubStatistics(): Promise<HubStatistics> {
       ) AS weeklyEpisodes,
 
       (
-        SELECT COUNT(DISTINCT series_tmdb_id || '-' || season_number || '-' || episode_number)
-        FROM episodes
-        WHERE is_watched = 1 AND watched_at IS NOT NULL
-          AND date(watched_at) >= date('now', 'localtime', 'weekday 0', '-6 days')
-          AND date(watched_at) < date('now', 'localtime', 'weekday 0', '+1 day')
-      ) AS weeklyDistinctEpisodes,
+  SELECT COUNT(*)
+  FROM (
+    SELECT series_tmdb_id, season_number, episode_number
+    FROM episodes
+    WHERE is_watched = 1 AND watched_at IS NOT NULL
+      AND date(watched_at) >= date('now', 'localtime', 'weekday 0', '-6 days')
+      AND date(watched_at) < date('now', 'localtime', 'weekday 0', '+1 day')
+
+    UNION
+
+    SELECT series_tmdb_id, season_number, episode_number
+    FROM rewatch
+    WHERE item_type = 'episode'
+      AND date(watched_at) >= date('now', 'localtime', 'weekday 0', '-6 days')
+      AND date(watched_at) < date('now', 'localtime', 'weekday 0', '+1 day')
+  )
+) AS weeklyDistinctEpisodes,
 
       (
         SELECT COUNT(*) FROM movies
@@ -1543,6 +1693,133 @@ export async function getHubStatistics(): Promise<HubStatistics> {
             AND date(watched_at) < date('now', 'localtime', 'weekday 0', '+1 day')
         )
       ) AS weeklyDistinctMovies,
+             (
+        SELECT COUNT(*) FROM episodes
+        WHERE is_watched = 1 AND watched_at IS NOT NULL
+          AND date(watched_at) >= date('now', 'localtime', 'start of month')
+          AND date(watched_at) < date('now', 'localtime', 'start of month', '+1 month')
+      ) +
+      (
+        SELECT COUNT(*) FROM rewatch
+        WHERE item_type = 'episode'
+          AND date(watched_at) >= date('now', 'localtime', 'start of month')
+          AND date(watched_at) < date('now', 'localtime', 'start of month', '+1 month')
+      ) AS monthlyEpisodes,
+
+      (
+        SELECT COUNT(*) FROM movies
+        WHERE is_watched = 1 AND watched_at IS NOT NULL
+          AND date(watched_at) >= date('now', 'localtime', 'start of month')
+          AND date(watched_at) < date('now', 'localtime', 'start of month', '+1 month')
+      ) +
+      (
+        SELECT COUNT(*) FROM rewatch
+        WHERE item_type = 'movie'
+          AND date(watched_at) >= date('now', 'localtime', 'start of month')
+          AND date(watched_at) < date('now', 'localtime', 'start of month', '+1 month')
+      ) AS monthlyMovies,
+
+      (
+  SELECT COUNT(DISTINCT series_tmdb_id || '-' || season_number || '-' || episode_number)
+  FROM (
+    SELECT series_tmdb_id, season_number, episode_number
+    FROM episodes
+    WHERE is_watched = 1 AND watched_at IS NOT NULL
+      AND date(watched_at) >= date('now', 'localtime', 'start of month')
+      AND date(watched_at) < date('now', 'localtime', 'start of month', '+1 month')
+
+    UNION
+
+    SELECT series_tmdb_id, season_number, episode_number
+    FROM rewatch
+    WHERE item_type = 'episode'
+      AND date(watched_at) >= date('now', 'localtime', 'start of month')
+      AND date(watched_at) < date('now', 'localtime', 'start of month', '+1 month')
+  )
+) AS monthlyDistinctEpisodes,
+
+(
+  SELECT COUNT(DISTINCT movie_tmdb_id)
+  FROM (
+    SELECT tmdb_id AS movie_tmdb_id
+    FROM movies
+    WHERE is_watched = 1 AND watched_at IS NOT NULL
+      AND date(watched_at) >= date('now', 'localtime', 'start of month')
+      AND date(watched_at) < date('now', 'localtime', 'start of month', '+1 month')
+
+    UNION
+
+    SELECT movie_tmdb_id
+    FROM rewatch
+    WHERE item_type = 'movie'
+      AND date(watched_at) >= date('now', 'localtime', 'start of month')
+      AND date(watched_at) < date('now', 'localtime', 'start of month', '+1 month')
+  )
+) AS monthlyDistinctMovies,
+
+      (
+        SELECT COUNT(*) FROM episodes
+        WHERE is_watched = 1 AND watched_at IS NOT NULL
+          AND date(watched_at) >= date('now', 'localtime', 'start of year')
+          AND date(watched_at) < date('now', 'localtime', 'start of year', '+1 year')
+      ) +
+      (
+        SELECT COUNT(*) FROM rewatch
+        WHERE item_type = 'episode'
+          AND date(watched_at) >= date('now', 'localtime', 'start of year')
+          AND date(watched_at) < date('now', 'localtime', 'start of year', '+1 year')
+      ) AS yearlyEpisodes,
+
+      (
+        SELECT COUNT(*) FROM movies
+        WHERE is_watched = 1 AND watched_at IS NOT NULL
+          AND date(watched_at) >= date('now', 'localtime', 'start of year')
+          AND date(watched_at) < date('now', 'localtime', 'start of year', '+1 year')
+      ) +
+      (
+        SELECT COUNT(*) FROM rewatch
+        WHERE item_type = 'movie'
+          AND date(watched_at) >= date('now', 'localtime', 'start of year')
+          AND date(watched_at) < date('now', 'localtime', 'start of year', '+1 year')
+      ) AS yearlyMovies,
+
+      (
+  SELECT COUNT(DISTINCT series_tmdb_id || '-' || season_number || '-' || episode_number)
+  FROM (
+    SELECT series_tmdb_id, season_number, episode_number
+    FROM episodes
+    WHERE is_watched = 1 AND watched_at IS NOT NULL
+      AND date(watched_at) >= date('now', 'localtime', 'start of year')
+      AND date(watched_at) < date('now', 'localtime', 'start of year', '+1 year')
+
+    UNION
+
+    SELECT series_tmdb_id, season_number, episode_number
+    FROM rewatch
+    WHERE item_type = 'episode'
+      AND date(watched_at) >= date('now', 'localtime', 'start of year')
+      AND date(watched_at) < date('now', 'localtime', 'start of year', '+1 year')
+  )
+) AS yearlyDistinctEpisodes,
+
+(
+  SELECT COUNT(DISTINCT movie_tmdb_id)
+  FROM (
+    SELECT tmdb_id AS movie_tmdb_id
+    FROM movies
+    WHERE is_watched = 1 AND watched_at IS NOT NULL
+      AND date(watched_at) >= date('now', 'localtime', 'start of year')
+      AND date(watched_at) < date('now', 'localtime', 'start of year', '+1 year')
+
+    UNION
+
+    SELECT movie_tmdb_id
+    FROM rewatch
+    WHERE item_type = 'movie'
+      AND date(watched_at) >= date('now', 'localtime', 'start of year')
+      AND date(watched_at) < date('now', 'localtime', 'start of year', '+1 year')
+  )
+) AS yearlyDistinctMovies,
 
       (
         SELECT COUNT(*) FROM episodes WHERE is_watched = 1
@@ -1554,6 +1831,12 @@ export async function getHubStatistics(): Promise<HubStatistics> {
       (
         SELECT COUNT(*) FROM episodes WHERE is_watched = 1
       ) AS totalDistinctEpisodes,
+
+            (
+        SELECT COUNT(DISTINCT series_tmdb_id)
+        FROM episodes
+        WHERE is_watched = 1
+      ) AS totalSeriesWatched,
 
       (
         SELECT COUNT(*) FROM movies WHERE is_watched = 1
@@ -1573,8 +1856,48 @@ export async function getHubStatistics(): Promise<HubStatistics> {
 
       (
         SELECT COUNT(*) FROM series
-        WHERE watch_status = 'completed'
-      ) AS completedSeries`,
+        WHERE watch_status = 'up_to_date'
+      ) AS completedSeries,
+       
+             (
+        SELECT COALESCE(SUM(runtime), 0)
+        FROM episodes
+        WHERE is_watched = 1
+      ) +
+      (
+        SELECT COALESCE(SUM(runtime), 0)
+        FROM movies
+        WHERE is_watched = 1
+      ) AS totalMinutes,
+
+      (
+        SELECT COALESCE(SUM(runtime), 0)
+        FROM episodes
+        WHERE is_watched = 1
+      ) AS seriesFirstWatchMinutes,
+
+      (
+        SELECT COALESCE(SUM(runtime), 0)
+        FROM movies
+        WHERE is_watched = 1
+      ) AS movieFirstWatchMinutes,
+
+      (
+        SELECT COALESCE(SUM(e.runtime), 0)
+        FROM rewatch r
+        JOIN episodes e
+          ON e.series_tmdb_id = r.series_tmdb_id
+          AND e.season_number = r.season_number
+          AND e.episode_number = r.episode_number
+        WHERE r.item_type = 'episode'
+      ) AS seriesRewatchMinutes,
+
+      (
+        SELECT COALESCE(SUM(m.runtime), 0)
+        FROM rewatch r
+        JOIN movies m ON m.tmdb_id = r.movie_tmdb_id
+        WHERE r.item_type = 'movie'
+      ) AS movieRewatchMinutes`,
   );
 
   return (
@@ -1589,7 +1912,85 @@ export async function getHubStatistics(): Promise<HubStatistics> {
       totalDistinctMovies: 0,
       startedSeries: 0,
       completedSeries: 0,
+      totalMinutes: 0,
+      monthlyEpisodes: 0,
+      monthlyMovies: 0,
+      yearlyEpisodes: 0,
+      yearlyMovies: 0,
+      totalSeriesWatched: 0,
+      seriesFirstWatchMinutes: 0,
+      movieFirstWatchMinutes: 0,
+      seriesRewatchMinutes: 0,
+      movieRewatchMinutes: 0,
+      monthlyDistinctEpisodes: 0,
+      monthlyDistinctMovies: 0,
+      yearlyDistinctEpisodes: 0,
+      yearlyDistinctMovies: 0,
     }
+  );
+}
+
+export async function getMostRewatchedMovies(): Promise<MostRewatchedMovie[]> {
+  const db = await getDatabase();
+
+  return db.getAllAsync<MostRewatchedMovie>(
+    `SELECT
+      m.tmdb_id,
+      m.title,
+      m.poster_path,
+      (
+        CASE WHEN m.is_watched = 1 THEN 1 ELSE 0 END +
+        COUNT(r.id)
+      ) AS watch_count
+    FROM movies m
+    LEFT JOIN rewatch r
+      ON r.item_type = 'movie'
+      AND r.movie_tmdb_id = m.tmdb_id
+    WHERE m.is_watched = 1
+    GROUP BY m.tmdb_id
+    HAVING watch_count > 1
+    ORDER BY watch_count DESC, m.title COLLATE NOCASE ASC
+    LIMIT 10`,
+  );
+}
+
+export async function getMostWatchedEpisodes(): Promise<MostWatchedEpisode[]> {
+  const db = await getDatabase();
+
+  return db.getAllAsync<MostWatchedEpisode>(
+    `SELECT
+      e.tmdb_id,
+      e.series_tmdb_id,
+      s.title AS series_title,
+      e.title AS episode_title,
+      e.season_number,
+      e.episode_number,
+      s.poster_path,
+      (
+        CASE WHEN e.is_watched = 1 THEN 1 ELSE 0 END +
+        (
+          SELECT COUNT(*)
+          FROM rewatch r
+          WHERE r.item_type = 'episode'
+            AND r.series_tmdb_id = e.series_tmdb_id
+            AND r.season_number = e.season_number
+            AND r.episode_number = e.episode_number
+        )
+      ) AS watch_count
+    FROM episodes e
+    JOIN series s ON s.tmdb_id = e.series_tmdb_id
+    WHERE e.is_watched = 1
+       OR EXISTS (
+          SELECT 1
+          FROM rewatch r
+          WHERE r.item_type = 'episode'
+            AND r.series_tmdb_id = e.series_tmdb_id
+            AND r.season_number = e.season_number
+            AND r.episode_number = e.episode_number
+       )
+    ORDER BY watch_count DESC, s.title COLLATE NOCASE ASC,
+      e.season_number ASC, e.episode_number ASC
+    LIMIT 10`,
   );
 }
 

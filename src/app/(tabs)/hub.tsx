@@ -1,16 +1,18 @@
 import { Image } from "expo-image";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
-import { ScrollView, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 
 import {
   getFavoriteMovies,
   getFavoriteSeries,
   getHubSettings,
+  getHubStatistics,
   getWatchHistory,
   HubFavoriteMovie,
   HubFavoriteSeries,
   HubHistoryItem,
+  HubStatistics,
   type HubSettings,
 } from "@/database";
 
@@ -23,8 +25,31 @@ import { TMDB_IMAGE_BASE_URL } from "@/services/tmdb";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 
+function formatWatchTime(totalMinutes: number): string {
+  if (totalMinutes <= 0) return "0 min";
+
+  const months = Math.floor(totalMinutes / (60 * 24 * 30));
+  const days = Math.floor((totalMinutes % (60 * 24 * 30)) / (60 * 24));
+  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+  const minutes = totalMinutes % 60;
+
+  return [
+    months > 0 ? `${months}M` : null,
+    days > 0 ? `${days}g` : null,
+    hours > 0 ? `${hours}h` : null,
+    minutes > 0 && months === 0 ? `${minutes}min` : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function formatNumber(value: number): string {
+  return value.toLocaleString("it-IT");
+}
+
 export default function HubScreen() {
   const [settings, setSettings] = useState<HubSettings | null>(null);
+  const [statistics, setStatistics] = useState<HubStatistics | null>(null);
 
   const [history, setHistory] = useState<HubHistoryItem[]>([]);
   const [favoriteSeries, setFavoriteSeries] = useState<HubFavoriteSeries[]>([]);
@@ -42,11 +67,13 @@ export default function HubScreen() {
           historyResult,
           favoriteSeriesResult,
           favoriteMoviesResult,
+          statisticsResult,
         ] = await Promise.all([
           getHubSettings(),
           getWatchHistory(20),
           getFavoriteSeries(),
           getFavoriteMovies(),
+          getHubStatistics(),
         ]);
 
         if (active) {
@@ -54,6 +81,7 @@ export default function HubScreen() {
           setHistory(historyResult);
           setFavoriteSeries(favoriteSeriesResult);
           setFavoriteMovies(favoriteMoviesResult);
+          setStatistics(statisticsResult);
         }
       }
 
@@ -240,6 +268,84 @@ export default function HubScreen() {
           </Text>
         </View>
       </View>
+
+      {/* Statistiche */}
+      <Pressable
+        onPress={() => router.push("../statistics")}
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          marginHorizontal: 20,
+          marginBottom: 30,
+          paddingVertical: 8,
+          paddingHorizontal: 10,
+          backgroundColor: colors.surface,
+          borderRadius: 12,
+        }}
+      >
+        <View style={{ flex: 1, alignItems: "center" }}>
+          <Text
+            style={{
+              color: colors.text,
+              fontSize: 18,
+              fontWeight: "700",
+            }}
+          >
+            {formatNumber(statistics?.totalDistinctEpisodes ?? 0)}
+          </Text>
+          <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
+            Episodi
+          </Text>
+        </View>
+
+        <View
+          style={{
+            width: 1,
+            height: 45,
+            backgroundColor: colors.textSecondary,
+            opacity: 0.5,
+          }}
+        />
+        <View style={{ flex: 1, alignItems: "center" }}>
+          <Text
+            style={{
+              color: colors.text,
+              fontSize: 18,
+              fontWeight: "700",
+            }}
+          >
+            {formatNumber(statistics?.totalDistinctMovies ?? 0)}
+          </Text>
+          <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
+            Film
+          </Text>
+        </View>
+        <View
+          style={{
+            width: 1,
+            height: 45,
+            backgroundColor: colors.textSecondary,
+            opacity: 0.5,
+          }}
+        />
+
+        <View style={{ flex: 1, alignItems: "center" }}>
+          <Text
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            style={{
+              color: colors.text,
+              fontSize: 18,
+              fontWeight: "700",
+            }}
+          >
+            {formatWatchTime(statistics?.totalMinutes ?? 0)}
+          </Text>
+          <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
+            Tempo totale
+          </Text>
+        </View>
+      </Pressable>
 
       {/* Cronologia */}
       <View style={{ marginHorizontal: 20 }}>
