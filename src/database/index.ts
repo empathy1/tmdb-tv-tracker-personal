@@ -1450,6 +1450,50 @@ export async function getFavoriteMovies(): Promise<HubFavoriteMovie[]> {
   );
 }
 
+export type HubBackgroundOption = {
+  media_type: "series" | "movie";
+  tmdb_id: number;
+  title: string;
+  backdrop_path: string;
+  is_favorite: number;
+};
+
+export async function getHubBackgroundOptions(): Promise<
+  HubBackgroundOption[]
+> {
+  const db = await getDatabase();
+
+  return db.getAllAsync<HubBackgroundOption>(
+    `SELECT
+       'series' AS media_type,
+       s.tmdb_id,
+       s.title,
+       s.backdrop_path,
+       CASE WHEN p.series_tmdb_id IS NOT NULL THEN 1 ELSE 0 END AS is_favorite
+     FROM series s
+     LEFT JOIN preferiti p
+       ON p.item_type = 'series'
+       AND p.series_tmdb_id = s.tmdb_id
+     WHERE s.backdrop_path IS NOT NULL
+
+     UNION ALL
+
+     SELECT
+       'movie' AS media_type,
+       m.tmdb_id,
+       m.title,
+       m.backdrop_path,
+       CASE WHEN p.movie_tmdb_id IS NOT NULL THEN 1 ELSE 0 END AS is_favorite
+     FROM movies m
+     LEFT JOIN preferiti p
+       ON p.item_type = 'movie'
+       AND p.movie_tmdb_id = m.tmdb_id
+     WHERE m.backdrop_path IS NOT NULL
+
+     ORDER BY is_favorite DESC, title COLLATE NOCASE`,
+  );
+}
+
 export type HubHistoryItem = {
   media_type: "movie" | "episode";
   tmdb_id: number | null;

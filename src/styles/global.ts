@@ -127,6 +127,48 @@ export const globalStyles = StyleSheet.create({
   backgroundImage: {
     ...StyleSheet.absoluteFill,
   },
+
+  //card liste
+  card: {
+    width: 145,
+    height: 190,
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    padding: spacing.md,
+    justifyContent: "space-between",
+    marginRight: spacing.md,
+  },
+  iconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: colors.surfaceLight,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  // Poster anteprima liste
+  listPostersGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 4,
+    width: 112,
+    height: 112,
+    alignSelf: "center",
+  },
+
+  listPoster: {
+    width: 54,
+    height: 54,
+    borderRadius: 4,
+  },
+
+  listPosterPlaceholder: {
+    width: 54,
+    height: 54,
+    borderRadius: 4,
+    backgroundColor: colors.surfaceLight,
+  },
 });
 
 export function getBottomActionContainerStyle(bottomInset: number): ViewStyle {

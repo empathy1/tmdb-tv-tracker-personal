@@ -15,6 +15,8 @@ type Props = {
   onCheck?: () => void;
   onPress: () => void;
   bottomContent?: React.ReactNode;
+  list?: boolean;
+  showTitle?: boolean;
 };
 
 export default function MediaCard({
@@ -24,17 +26,23 @@ export default function MediaCard({
   action,
   onPress,
   bottomContent,
+  list = false,
+  showTitle = true,
   info,
 }: Props) {
   const { width: screenWidth } = useWindowDimensions();
-  const { cardWidth } = getMediaCardLayout(screenWidth, horizontal);
+  const { cardWidth, listPosterWidth, listPosterHeight } = getMediaCardLayout(
+    screenWidth,
+    horizontal,
+    list,
+  );
   const normalizedPoster = poster?.trim();
 
   return (
     <View
       style={{
-        width: cardWidth,
-        height: horizontal ? 230 : undefined,
+        width: list ? listPosterWidth : cardWidth,
+        height: list ? listPosterHeight : horizontal ? 230 : undefined,
         marginBottom: 10,
       }}
     >
@@ -45,7 +53,9 @@ export default function MediaCard({
               source={{ uri: normalizedPoster }}
               style={{
                 width: "100%",
-                aspectRatio: 2 / 3,
+                ...(list
+                  ? { height: listPosterHeight }
+                  : { aspectRatio: 2 / 3 }),
                 borderRadius: 5,
               }}
               contentFit="cover"
@@ -54,7 +64,9 @@ export default function MediaCard({
             <View
               style={{
                 width: "100%",
-                aspectRatio: 2 / 3,
+                ...(list
+                  ? { height: listPosterHeight }
+                  : { aspectRatio: 2 / 3 }),
                 borderRadius: 5,
                 backgroundColor: colors.surface,
                 justifyContent: "center",
@@ -87,18 +99,20 @@ export default function MediaCard({
           )}
         </View>
 
-        <Text
-          numberOfLines={1}
-          ellipsizeMode="tail"
-          style={{
-            color: colors.text,
-            fontSize: 14,
-            fontWeight: "600",
-            marginTop: 6,
-          }}
-        >
-          {title}
-        </Text>
+        {showTitle && (
+          <Text
+            numberOfLines={1}
+            ellipsizeMode="tail"
+            style={{
+              color: colors.text,
+              fontSize: 14,
+              fontWeight: "600",
+              marginTop: 6,
+            }}
+          >
+            {title}
+          </Text>
+        )}
       </Pressable>
 
       <View

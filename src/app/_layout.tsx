@@ -3,6 +3,7 @@ import { DATABASE_NAME, initializeDatabase } from "@/database";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
 import { Stack } from "expo-router";
 import { SQLiteProvider } from "expo-sqlite";
+import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 export default function RootLayout() {
@@ -18,6 +19,7 @@ export default function RootLayout() {
           await initializeDatabase(db);
         }}
       >
+        <StatusBar hidden />
         <LanguageProvider>
           <BottomSheetModalProvider>
             <Stack screenOptions={{ headerShown: false }}>

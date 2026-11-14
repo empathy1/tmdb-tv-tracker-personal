@@ -5,12 +5,12 @@ import { Pressable, ScrollView, Text, View } from "react-native";
 
 import { spacing } from "@/constants/theme";
 import {
-    getHubStatistics,
-    getMostRewatchedMovies,
-    getMostWatchedEpisodes,
-    MostRewatchedMovie,
-    MostWatchedEpisode,
-    type HubStatistics,
+  getHubStatistics,
+  getMostRewatchedMovies,
+  getMostWatchedEpisodes,
+  MostRewatchedMovie,
+  MostWatchedEpisode,
+  type HubStatistics,
 } from "@/database";
 import { colors } from "@/styles/global";
 import { Image } from "expo-image";
@@ -408,7 +408,11 @@ export default function StatisticsScreen() {
         </Text>
 
         <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
-          Prime visioni
+          {formatWatchTime(
+            (statistics?.seriesRewatchMinutes ?? 0) +
+              (statistics?.movieRewatchMinutes ?? 0),
+          )}{" "}
+          rivisto
         </Text>
 
         <View

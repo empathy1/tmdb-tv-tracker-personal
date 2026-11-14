@@ -1190,3 +1190,52 @@ Rimane da completare/verificare l'ultimo passaggio: collegare le proprietà corr
 
 In sintesi: le statistiche ora distinguono quante volte hai guardato qualcosa da quanti contenuti diversi hai guardato, considerando anche i rewatch.
 
+## Riepilogo del lavoro 14 novembre 2026 – Personalizzazione sfondo Hub
+Abbiamo implementato la possibilità di personalizzare l'immagine panoramica nella parte superiore dell'Hub, utilizzando i backdrop disponibili su TMDB.
+### 1. Recupero dei contenuti dal database
+- Creata la funzione getHubBackgroundOptions().
+- Recupera film e serie già presenti nel database.
+- Include solo i contenuti che hanno un'immagine di sfondo (backdrop_path).
+- Mostra prima i contenuti preferiti e poi gli altri.
+- Restituisce titolo, TMDB ID, tipo di contenuto e informazioni sui preferiti.
+### 2. Recupero dei backdrop da TMDB
+Nel file src/services/tmdb.ts abbiamo aggiunto:
+- Il tipo TMDBBackdrop.
+- Il tipo TMDBImagesResponse.
+- La funzione getMediaBackdrops().
+La funzione:
+- Recupera tutte le immagini disponibili per un film o una serie.
+- Filtra le immagini panoramiche con rapporto d'aspetto superiore a 1,5.
+- Ordina i risultati in base al voto medio.
+### 3. Interfaccia di selezione
+In src/app/(tabs)/hub.tsx abbiamo aggiunto un BottomSheetModal con due modalità:
+- Prima schermata: griglia di film e serie presenti nel database.
+- Seconda schermata: griglia dei backdrop disponibili su TMDB per il contenuto selezionato.
+Abbiamo inoltre aggiunto:
+- Pulsante con icona matita nell'angolo superiore destro dello sfondo Hub.
+- Freccia per tornare alla selezione dei contenuti.
+- Apertura sempre sulla schermata iniziale, anche quando si riapre il pannello.
+- Visualizzazione delle immagini in formato panoramico.
+### 4. Salvataggio dello sfondo
+Quando viene selezionato un backdrop:
+1. Viene costruito l'URL completo dell'immagine in formato w1280.
+2. Viene aggiornato il campo hub_poster nella tabella hub_settings.
+3. I campi name e avatar vengono mantenuti invariati.
+4. Lo stato settings viene aggiornato immediatamente per visualizzare la nuova immagine.
+Durante il salvataggio:
+- Il Bottom Sheet viene chiuso.
+- Compare un overlay scuro con indicatore di caricamento.
+- I tocchi sull'Hub vengono temporaneamente bloccati.
+### 5. Correzioni e verifiche
+- Risolti i problemi TypeScript derivanti dall'utilizzo di HubBackgroundOption e TMDBBackdrop nella stessa BottomSheetFlatList.
+- Distinti correttamente i due tipi tramite il controllo "file_path" in item.
+- Ripristinato il renderItem originale della cronologia, dopo una modifica accidentale.
+- Verificata l'assenza di errori TypeScript.
+
+Abbiamo anche nascosto a barra di stato del telefono.
+
+Completato
+ Personalizzazione dello sfondo Hub implementata.
+
+La nuova funzionalità permette di scegliere tra i film e le serie della propria libreria e utilizzare qualsiasi backdrop panoramico disponibile su TMDB, salvandolo direttamente nel database.
+

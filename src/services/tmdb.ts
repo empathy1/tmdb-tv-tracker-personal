@@ -14,6 +14,19 @@ import { getTMDBLanguage } from "./titleLanguage";
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 export const TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w500";
 
+export type TMDBBackdrop = {
+  aspect_ratio: number;
+  file_path: string;
+  height: number;
+  width: number;
+  vote_average: number;
+  vote_count: number;
+};
+
+type TMDBImagesResponse = {
+  backdrops: TMDBBackdrop[];
+};
+
 const TMDB_ACCESS_TOKEN = process.env.EXPO_PUBLIC_TMDB_ACCESS_TOKEN;
 
 if (!TMDB_ACCESS_TOKEN) {
@@ -241,6 +254,19 @@ export async function getMovieDetails(
   }
 
   return details;
+}
+
+export async function getMediaBackdrops(
+  id: number,
+  mediaType: "movie" | "tv",
+): Promise<TMDBBackdrop[]> {
+  const images = await tmdbFetch<TMDBImagesResponse>(
+    `/${mediaType}/${id}/images`,
+  );
+
+  return images.backdrops
+    .filter((image) => image.aspect_ratio > 1.5)
+    .sort((a, b) => b.vote_average - a.vote_average);
 }
 
 type TMDBMovieExternalIds = {
