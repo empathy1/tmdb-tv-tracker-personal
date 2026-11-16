@@ -1239,3 +1239,96 @@ Completato
 
 La nuova funzionalità permette di scegliere tra i film e le serie della propria libreria e utilizzare qualsiasi backdrop panoramico disponibile su TMDB, salvandolo direttamente nel database.
 
+## Riepilogo – Pulsante Impostazioni e gestione database
+Ultimi lavori completati il 15 novembre 2026
+
+Abbiamo completato il lavoro sul pulsante delle impostazioni (icona con i tre puntini) nella schermata Hub, introducendo la possibilità di esportare e importare il database di TV Tracker.
+1. Bottom Sheet delle impostazioni
+- Risolto il problema che impediva l'apertura del Bottom Sheet delle impostazioni.
+- Il problema è stato risolto utilizzando BottomSheetView come contenitore diretto del contenuto del secondo BottomSheetModal.
+- Ora sono presenti due Bottom Sheet indipendenti:
+  - Selezione dello sfondo (matita).
+  - Impostazioni database (tre puntini).
+- Il menu database contiene due operazioni:
+  - Esporta database.
+  - Importa database.
+2. Esportazione del database
+La funzione exportDatabaseFile() è già implementata e funzionante.
+
+Procedura:
+1. Recupera il database SQLite.
+2. Verifica che sia leggibile.
+3. Crea una copia consistente tramite serializeAsync().
+4. Salva il backup nella cache dell'app.
+5. Apre il pannello di condivisione Android.
+Il file viene generato con un nome simile a:
+tv_tracker_XXXXXXXX.db
+
+
+3. Importazione del database
+Abbiamo risolto diversi problemi relativi alla lettura dei file su Android.
+
+Inizialmente utilizzavamo DocumentPicker e readAsStringAsync(), ma Android restituiva errori di autorizzazione:
+- Missing 'READ' permission
+- Location isn't readable
+Abbiamo quindi cambiato approccio:
+- Utilizzo di File.pickFileAsync() di expo-file-system.
+- Lettura del file tramite la nuova API File.
+- Rimozione della copia manuale tramite copyAsync().
+- Passaggio diretto del file alla funzione importDatabaseFile().
+Abbiamo anche scoperto che Android può restituire un nome interno del documento, ad esempio 140, invece del nome effettivo del backup. Per questo abbiamo eliminato il controllo sull'estensione .db.
+4. Verifica e ripristino
+La funzione importDatabaseFile() utilizza:
+- SQLite.deserializeDatabaseAsync() per aprire temporaneamente il backup.
+- PRAGMA integrity_check per verificarne l'integrità.
+- SQLite.backupDatabaseAsync() per ripristinare il database utilizzato dall'app.
+Dopo l'importazione viene aggiornato refreshKey, così da ricaricare i dati della schermata Hub.
+
+## Riepilogo lavoro – 16 novembre 2026
+Oggi abbiamo completato il lavoro sulla gestione dei backup del database di TV Tracker, concentrandoci su esportazione, importazione e relativi indicatori di caricamento.
+1. Esportazione del database
+Abbiamo modificato exportDatabaseFile() per creare un backup pulito senza modificare il database utilizzato dall'app.
+
+In particolare:
+- Creiamo una copia temporanea del database tramite serializeAsync() e deserializeDatabaseAsync().
+- Disabilitiamo temporaneamente i controlli sulle chiavi esterne nella copia.
+- Eliminiamo dalla copia le tabelle legacy e quelle utilizzate esclusivamente per le migrazioni.
+- Manteniamo nel backup le tabelle necessarie al funzionamento dell'app.
+- Salviamo il file .db nella cache e lo condividiamo tramite la finestra Android.
+Abbiamo verificato che il backup contenga queste tabelle:
+elenco_liste
+episodes
+hub_settings
+liste
+movies
+preferiti
+rewatch
+series
+sqlite_sequence
+
+
+Il database originale rimane invariato.
+2. Importazione del database
+Abbiamo completato importDatabaseFile() aggiungendo diversi controlli prima del ripristino:
+- Verifica dell'integrità SQLite tramite PRAGMA integrity_check.
+- Verifica della presenza di tutte le tabelle obbligatorie.
+- Confronto della struttura delle tabelle, comprese colonne, tipi, valori predefiniti e chiavi primarie.
+- Rifiuto dei backup non validi o incompatibili.
+- Ripristino del database tramite SQLite.backupDatabaseAsync().
+Abbiamo inoltre risolto un problema di autorizzazioni durante la lettura del file selezionato, passando a file.bytes().
+
+Test superato
+ Abbiamo verificato che l'importazione del backup generato dall'app funzioni correttamente.
+3. Indicatori di caricamento
+Abbiamo aggiunto un indicatore visivo nella schermata Hub, utilizzando ActivityIndicator.
+
+Esportazione:
+- Compare quando si avvia l'esportazione.
+- Rimane visibile durante la preparazione del backup.
+- Scompare prima dell'apertura della finestra di condivisione Android.
+Importazione:
+- Compare solo dopo aver confermato l'operazione.
+- Rimane visibile durante il ripristino.
+- Scompare prima dell'avviso di completamento o di errore.
+Abbiamo riutilizzato lo stato isDatabaseLoading per entrambe le operazioni.
+

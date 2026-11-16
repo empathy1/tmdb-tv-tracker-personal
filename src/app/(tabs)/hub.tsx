@@ -3,13 +3,17 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
+  Modal,
   Pressable,
   ScrollView,
   Text,
+  TextInput,
   View,
 } from "react-native";
 
 import {
+  exportDatabaseFile,
   getFavoriteMovies,
   getFavoriteSeries,
   getHubBackgroundOptions,
@@ -25,11 +29,16 @@ import {
   HubList,
   HubListItem,
   HubStatistics,
+  importDatabaseFile,
   saveHubSettings,
   type HubSettings,
 } from "@/database";
 
+import { File } from "expo-file-system";
+import * as ImagePicker from "expo-image-picker";
+
 import { colors } from "@/styles/global";
+import * as FileSystem from "expo-file-system/legacy";
 
 import HorizontalMediaList from "@/components/HorizontalMediaList";
 import ListsCarousel from "@/components/lists/ListsCarousel";
@@ -43,8 +52,10 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import {
   BottomSheetBackdrop,
+  BottomSheetBackdropProps,
   BottomSheetFlatList,
   BottomSheetModal,
+  BottomSheetView,
 } from "@gorhom/bottom-sheet";
 import { LinearGradient } from "expo-linear-gradient";
 
@@ -80,26 +91,131 @@ export default function HubScreen() {
   const [lists, setLists] = useState<(HubList & { items: HubListItem[] })[]>(
     [],
   );
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const [backgroundOptions, setBackgroundOptions] = useState<
     HubBackgroundOption[]
   >([]);
 
   const [isSavingBackground, setIsSavingBackground] = useState(false);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [selectedMedia, setSelectedMedia] =
     useState<HubBackgroundOption | null>(null);
+  const [isDatabaseLoading, setIsDatabaseLoading] = useState(false);
 
   const [mediaBackdrops, setMediaBackdrops] = useState<TMDBBackdrop[]>([]);
   const [isLoadingBackdrops, setIsLoadingBackdrops] = useState(false);
 
+  const [isNameModalVisible, setIsNameModalVisible] = useState(false);
+  const [editedName, setEditedName] = useState("");
+  const [isSavingName, setIsSavingName] = useState(false);
+
   const backgroundSheetRef = useRef<BottomSheetModal>(null);
+  const databaseSheetRef = useRef<BottomSheetModal>(null);
+
   const backgroundSnapPoints = ["85%"];
+
+  const renderDatabaseBackdrop = useCallback(
+    (props: BottomSheetBackdropProps) => (
+      <BottomSheetBackdrop
+        {...props}
+        appearsOnIndex={0}
+        disappearsOnIndex={-1}
+        pressBehavior="close"
+      />
+    ),
+    [],
+  );
+
+  const handleExportDatabase = async () => {
+    if (isDatabaseLoading) return;
+
+    setIsDatabaseLoading(true);
+
+    try {
+      await exportDatabaseFile(() => {
+        setIsDatabaseLoading(false);
+      });
+    } catch (error) {
+      console.error("Errore durante l'esportazione:", error);
+
+      Alert.alert(
+        "Esportazione non riuscita",
+        "Non è stato possibile esportare il database.",
+      );
+    } finally {
+      setIsDatabaseLoading(false);
+    }
+  };
+
+  const handleImportDatabase = async () => {
+    try {
+      const result = await File.pickFileAsync({
+        mimeTypes: ["*/*"],
+      });
+
+      if (result.canceled) return;
+
+      const file = result.result;
+
+      console.log("FILE SELEZIONATO:", {
+        name: file.name,
+        uri: file.uri,
+        type: file.type,
+      });
+
+      Alert.alert(
+        "Importa database",
+        "Attenzione: tutti i dati attuali verranno sostituiti con quelli del backup. Vuoi continuare?",
+        [
+          { text: "Annulla", style: "cancel" },
+          {
+            text: "Importa",
+            style: "destructive",
+            onPress: async () => {
+              if (isDatabaseLoading) return;
+
+              setIsDatabaseLoading(true);
+
+              try {
+                await importDatabaseFile(file);
+                setRefreshKey((value) => value + 1);
+              } catch (error) {
+                console.error("Errore durante l'importazione:", error);
+
+                Alert.alert(
+                  "Importazione non riuscita",
+                  "Non è stato possibile ripristinare il database.",
+                );
+
+                return;
+              } finally {
+                setIsDatabaseLoading(false);
+              }
+
+              Alert.alert(
+                "Importazione completata",
+                "Il database è stato ripristinato correttamente.",
+              );
+            },
+          },
+        ],
+      );
+    } catch (error) {
+      console.error("Errore nella selezione del backup:", error);
+      Alert.alert("Errore", "Non è stato possibile selezionare il file.");
+    }
+  };
 
   const openBackgroundSheet = () => {
     setSelectedMedia(null);
     setMediaBackdrops([]);
     setIsLoadingBackdrops(false);
     backgroundSheetRef.current?.present();
+  };
+
+  const openDatabaseSheet = () => {
+    databaseSheetRef.current?.present();
   };
 
   const openMediaBackdrops = async (item: HubBackgroundOption) => {
@@ -143,6 +259,81 @@ export default function HubScreen() {
       console.error("Errore nel salvataggio dello sfondo:", error);
     } finally {
       setIsSavingBackground(false);
+    }
+  };
+
+  const selectProfileImage = async () => {
+    if (isSavingProfile) return;
+
+    try {
+      const permission =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+      if (!permission.granted) {
+        Alert.alert(
+          "Permesso necessario",
+          "Per scegliere una foto profilo devi consentire l'accesso alla galleria.",
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (result.canceled || !result.assets[0]) return;
+
+      setIsSavingProfile(true);
+
+      const imageUri = result.assets[0].uri;
+      const extension = imageUri.split(".").pop()?.split("?")[0] || "jpg";
+      const avatarPath = `${FileSystem.documentDirectory}avatar-${Date.now()}.${extension}`;
+
+      await FileSystem.copyAsync({
+        from: imageUri,
+        to: avatarPath,
+      });
+
+      const updatedSettings: HubSettings = {
+        name: settings?.name ?? null,
+        avatar: avatarPath,
+        hub_poster: settings?.hub_poster ?? null,
+      };
+
+      await saveHubSettings(updatedSettings);
+      setSettings(updatedSettings);
+    } catch (error) {
+      console.error("Errore nel salvataggio della foto profilo:", error);
+      Alert.alert("Errore", "Non è stato possibile salvare la foto profilo.");
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
+
+  const saveProfileName = async () => {
+    if (isSavingName) return;
+
+    setIsSavingName(true);
+
+    try {
+      const updatedSettings: HubSettings = {
+        name: editedName.trim() || null,
+        avatar: settings?.avatar ?? null,
+        hub_poster: settings?.hub_poster ?? null,
+      };
+
+      await saveHubSettings(updatedSettings);
+
+      setSettings(updatedSettings);
+      setIsNameModalVisible(false);
+    } catch (error) {
+      console.error("Errore nel salvataggio del nome:", error);
+      Alert.alert("Errore", "Non è stato possibile salvare il nome.");
+    } finally {
+      setIsSavingName(false);
     }
   };
 
@@ -194,7 +385,7 @@ export default function HubScreen() {
       return () => {
         active = false;
       };
-    }, []),
+    }, [refreshKey]),
   );
 
   const openHistoryItem = (item: HubHistoryItem) => {
@@ -325,22 +516,50 @@ export default function HubScreen() {
               }}
             />
 
-            <Pressable
-              onPress={openBackgroundSheet}
+            <View
               style={{
                 position: "absolute",
                 top: 16,
                 right: 16,
-                width: 40,
-                height: 40,
-                borderRadius: 20,
-                backgroundColor: "#00000099",
-                alignItems: "center",
-                justifyContent: "center",
+                flexDirection: "row",
+                gap: 8,
               }}
             >
-              <Ionicons name="pencil" size={19} color="#FFFFFF" />
-            </Pressable>
+              <Pressable
+                onPress={() => {
+                  console.log("IMPOSTAZIONI PREMUTE");
+                  openDatabaseSheet();
+                }}
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 20,
+                  backgroundColor: "#00000099",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Ionicons
+                  name="ellipsis-horizontal"
+                  size={20}
+                  color="#FFFFFF"
+                />
+              </Pressable>
+
+              <Pressable
+                onPress={openBackgroundSheet}
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 20,
+                  backgroundColor: "#00000099",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Ionicons name="pencil" size={19} color="#FFFFFF" />
+              </Pressable>
+            </View>
           </View>
 
           <View
@@ -351,7 +570,9 @@ export default function HubScreen() {
               marginLeft: 20,
             }}
           >
-            <View
+            <Pressable
+              onPress={selectProfileImage}
+              disabled={isSavingProfile}
               style={{
                 width: 100,
                 height: 100,
@@ -375,19 +596,37 @@ export default function HubScreen() {
                   ?
                 </Text>
               )}
-            </View>
+            </Pressable>
 
-            <Text
+            <Pressable
+              onPress={() => {
+                setEditedName(settings?.name ?? "");
+                setIsNameModalVisible(true);
+              }}
               style={{
-                color: colors.text,
-                fontSize: 20,
-                fontWeight: "700",
+                flexDirection: "row",
+                alignItems: "center",
                 marginLeft: 12,
                 marginTop: 30,
               }}
             >
-              {settings?.name || "Il mio profilo"}
-            </Text>
+              <Text
+                style={{
+                  color: colors.text,
+                  fontSize: 20,
+                  fontWeight: "700",
+                }}
+              >
+                {settings?.name || "Il mio profilo"}
+              </Text>
+
+              <Ionicons
+                name="pencil"
+                size={14}
+                color={colors.textSecondary}
+                style={{ marginLeft: 8 }}
+              />
+            </Pressable>
           </View>
         </View>
 
@@ -546,7 +785,88 @@ export default function HubScreen() {
           />
         </View>
       </ScrollView>
+      <Modal
+        visible={isNameModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsNameModalVisible(false)}
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: "#00000099",
+            justifyContent: "center",
+            paddingHorizontal: 30,
+          }}
+        >
+          <View
+            style={{
+              backgroundColor: colors.surface,
+              borderRadius: 16,
+              padding: 20,
+            }}
+          >
+            <Text
+              style={{
+                color: colors.text,
+                fontSize: 18,
+                fontWeight: "700",
+                marginBottom: 16,
+              }}
+            >
+              Modifica nome
+            </Text>
 
+            <TextInput
+              value={editedName}
+              onChangeText={setEditedName}
+              placeholder="Inserisci il tuo nome"
+              placeholderTextColor={colors.textSecondary}
+              maxLength={30}
+              autoFocus
+              style={{
+                color: colors.text,
+                backgroundColor: colors.surfaceLight,
+                borderRadius: 8,
+                paddingHorizontal: 12,
+                paddingVertical: 10,
+                fontSize: 16,
+              }}
+            />
+
+            <View
+              style={{
+                flexDirection: "row",
+                justifyContent: "flex-end",
+                marginTop: 20,
+                gap: 12,
+              }}
+            >
+              <Pressable
+                onPress={() => setIsNameModalVisible(false)}
+                disabled={isSavingName}
+                style={{ padding: 10 }}
+              >
+                <Text style={{ color: colors.textSecondary }}>Annulla</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={saveProfileName}
+                disabled={isSavingName}
+                style={{ padding: 10 }}
+              >
+                {isSavingName ? (
+                  <ActivityIndicator color={colors.primary} />
+                ) : (
+                  <Text style={{ color: colors.primary, fontWeight: "700" }}>
+                    Salva
+                  </Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
       {isSavingBackground && (
         <View
           style={{
@@ -580,10 +900,45 @@ export default function HubScreen() {
         </View>
       )}
 
+      {isDatabaseLoading && (
+        <View
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 20,
+            elevation: 20,
+            backgroundColor: "#000000a1",
+          }}
+          pointerEvents="auto"
+        >
+          <View
+            style={{
+              backgroundColor: colors.surface,
+              paddingHorizontal: 24,
+              paddingVertical: 18,
+              borderRadius: 12,
+              alignItems: "center",
+            }}
+          >
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={{ color: colors.text, marginTop: 10 }}>
+              Operazione sul database in corso...
+            </Text>
+          </View>
+        </View>
+      )}
+
       <BottomSheetModal
         ref={backgroundSheetRef}
         snapPoints={backgroundSnapPoints}
         enablePanDownToClose
+        onChange={(index) => console.log("SHEET INDEX:", index)}
+        onDismiss={() => console.log("SHEET DISMISSED")}
         backgroundStyle={{ backgroundColor: colors.surface }}
         handleIndicatorStyle={{ backgroundColor: colors.textSecondary }}
         backdropComponent={(props) => (
@@ -705,6 +1060,67 @@ export default function HubScreen() {
             }
           />
         </View>
+      </BottomSheetModal>
+
+      <BottomSheetModal
+        ref={databaseSheetRef}
+        index={0}
+        backdropComponent={renderDatabaseBackdrop}
+        snapPoints={["35%"]}
+        enablePanDownToClose
+        backgroundStyle={{ backgroundColor: colors.surface }}
+        handleIndicatorStyle={{ backgroundColor: colors.textSecondary }}
+      >
+        <BottomSheetView style={{ flex: 1, padding: 20 }}>
+          <Text
+            style={{
+              color: colors.text,
+              fontSize: 18,
+              fontWeight: "700",
+              marginBottom: 20,
+            }}
+          >
+            Database
+          </Text>
+
+          <Pressable
+            onPress={() => {
+              databaseSheetRef.current?.dismiss();
+              handleExportDatabase();
+            }}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              paddingVertical: 14,
+            }}
+          >
+            <Ionicons name="download-outline" size={22} color={colors.text} />
+            <Text style={{ color: colors.text, fontSize: 16, marginLeft: 12 }}>
+              Esporta database
+            </Text>
+          </Pressable>
+
+          <Pressable
+            onPress={() => {
+              databaseSheetRef.current?.dismiss();
+              handleImportDatabase();
+            }}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              paddingVertical: 14,
+            }}
+          >
+            <Ionicons
+              name="cloud-upload-outline"
+              size={22}
+              color={colors.text}
+            />
+            <Text style={{ color: colors.text, fontSize: 16, marginLeft: 12 }}>
+              Importa database
+            </Text>
+          </Pressable>
+        </BottomSheetView>
       </BottomSheetModal>
     </>
   );

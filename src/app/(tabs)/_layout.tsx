@@ -19,8 +19,12 @@ export default function TabLayout() {
         name="index"
         options={{
           title: "Home",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="home" size={size} color={color} />
+          tabBarIcon: ({ focused, size }) => (
+            <Ionicons
+              name="home"
+              size={size}
+              color={focused ? colors.primary : colors.textSecondary}
+            />
           ),
         }}
       />
@@ -28,8 +32,12 @@ export default function TabLayout() {
         name="search"
         options={{
           title: "Search",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="search" size={size} color={color} />
+          tabBarIcon: ({ focused, size }) => (
+            <Ionicons
+              name="search"
+              size={size}
+              color={focused ? colors.primary : colors.textSecondary}
+            />
           ),
         }}
       />
@@ -37,8 +45,12 @@ export default function TabLayout() {
         name="hub"
         options={{
           title: "Hub",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="list" size={size} color={color} />
+          tabBarIcon: ({ focused, size }) => (
+            <Ionicons
+              name="list"
+              size={size}
+              color={focused ? colors.primary : colors.textSecondary}
+            />
           ),
         }}
       />

@@ -6,6 +6,7 @@ import type {
   TMDBTvSeasonDetails,
 } from "@/types/tmdb";
 
+import { File } from "expo-file-system";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 
@@ -136,47 +137,180 @@ export async function saveTvSeasonEpisodes(
   });
 }
 
-export async function exportDatabaseFile(): Promise<void> {
+export async function exportDatabaseFile(
+  onBeforeShare?: () => void,
+): Promise<void> {
   const db = await getDatabase();
 
-  // Verifica che il database sia leggibile.
-  const tables = await db.getAllAsync<{ name: string }>(
-    `SELECT name
-     FROM sqlite_master
-     WHERE type = 'table'
-     ORDER BY name`,
-  );
+  // Crea una copia temporanea del database originale.
+  const originalBackup = await db.serializeAsync();
+  const temporaryDb = await SQLite.deserializeDatabaseAsync(originalBackup);
 
-  console.log(
-    "Tabelle nel database:",
-    tables.map((table) => table.name),
-  );
+  try {
+    await temporaryDb.execAsync("PRAGMA foreign_keys = OFF;");
 
-  // Crea una copia coerente del database nella cache.
-  const backup = await db.serializeAsync();
+    const excludedTables = [
+      "legacy_episode_mapping_attempts",
+      "episode_history_mappings",
+      "legacy_series_migrations",
+      "legacy_episodes",
+      "legacy_movies",
+      "legacy_series",
+      "schema_migrations",
+    ];
 
-  const fileName = `tv_tracker_${Date.now()}.db`;
-  const destination = `${FileSystem.cacheDirectory}${fileName}`;
+    for (const table of excludedTables) {
+      await temporaryDb.execAsync(`DROP TABLE IF EXISTS "${table}";`);
+    }
 
-  const bytes = Array.from(backup);
+    const tables = await temporaryDb.getAllAsync<{ name: string }>(
+      `SELECT name
+       FROM sqlite_master
+       WHERE type = 'table'
+       ORDER BY name`,
+    );
 
-  const binaryString = bytes.map((byte) => String.fromCharCode(byte)).join("");
+    console.log(
+      "Tabelle nel backup:",
+      tables.map((table) => table.name),
+    );
 
-  const base64 = btoa(binaryString);
+    const backup = await temporaryDb.serializeAsync();
 
-  await FileSystem.writeAsStringAsync(destination, base64, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
+    const fileName = `tv_tracker_${Date.now()}.db`;
+    const destination = `${FileSystem.cacheDirectory}${fileName}`;
 
-  if (!(await Sharing.isAvailableAsync())) {
-    throw new Error("La condivisione dei file non è disponibile.");
+    const bytes = Array.from(backup);
+    const binaryString = bytes
+      .map((byte) => String.fromCharCode(byte))
+      .join("");
+
+    const base64 = btoa(binaryString);
+
+    await FileSystem.writeAsStringAsync(destination, base64, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+
+    if (!(await Sharing.isAvailableAsync())) {
+      throw new Error("La condivisione dei file non è disponibile.");
+    }
+
+    // Comunica a HubScreen che il file è pronto.
+    onBeforeShare?.();
+
+    // Attende un frame per permettere l'aggiornamento dell'interfaccia.
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => resolve());
+    });
+
+    await Sharing.shareAsync(destination, {
+      mimeType: "application/x-sqlite3",
+      dialogTitle: "Esporta database TV Tracker",
+      UTI: "public.database",
+    });
+  } finally {
+    await temporaryDb.closeAsync();
   }
+}
 
-  await Sharing.shareAsync(destination, {
-    mimeType: "application/x-sqlite3",
-    dialogTitle: "Esporta database TV Tracker",
-    UTI: "public.database",
-  });
+export async function importDatabaseFile(file: File): Promise<void> {
+  const db = await getDatabase();
+
+  // Legge direttamente il file selezionato.
+  const bytes = await file.bytes();
+
+  // Apre il backup come database temporaneo in memoria.
+  const importedDb = await SQLite.deserializeDatabaseAsync(bytes);
+
+  try {
+    // Verifica che il database sia integro.
+    const integrity = await importedDb.getFirstAsync<{
+      integrity_check: string;
+    }>("PRAGMA integrity_check");
+
+    if (integrity?.integrity_check !== "ok") {
+      throw new Error("Il database selezionato non è integro.");
+    }
+
+    // Controlla la presenza delle principali tabelle.
+    const tables = await importedDb.getAllAsync<{ name: string }>(
+      `SELECT name
+       FROM sqlite_master
+       WHERE type = 'table'`,
+    );
+
+    const tableNames = tables.map((table) => table.name);
+    console.log("TABELLE PRESENTI NEL BACKUP:", tableNames);
+    const requiredTables = [
+      "series",
+      "episodes",
+      "movies",
+      "liste",
+      "elenco_liste",
+      "preferiti",
+      "rewatch",
+      "hub_settings",
+    ];
+
+    if (!requiredTables.every((name) => tableNames.includes(name))) {
+      throw new Error(
+        "Il file selezionato non è un backup valido di TV Tracker.",
+      );
+    }
+
+    // Verifica che le colonne delle tabelle siano compatibili.
+    for (const table of requiredTables) {
+      const importedColumns = await importedDb.getAllAsync<{
+        name: string;
+        type: string;
+        notnull: number;
+        dflt_value: string | null;
+        pk: number;
+      }>(`PRAGMA table_info("${table}")`);
+
+      const currentColumns = await db.getAllAsync<{
+        name: string;
+        type: string;
+        notnull: number;
+        dflt_value: string | null;
+        pk: number;
+      }>(`PRAGMA table_info("${table}")`);
+
+      const importedStructure = importedColumns.map((column) => ({
+        name: column.name,
+        type: column.type,
+        notnull: column.notnull,
+        dflt_value: column.dflt_value,
+        pk: column.pk,
+      }));
+
+      const currentStructure = currentColumns.map((column) => ({
+        name: column.name,
+        type: column.type,
+        notnull: column.notnull,
+        dflt_value: column.dflt_value,
+        pk: column.pk,
+      }));
+
+      if (
+        JSON.stringify(importedStructure) !== JSON.stringify(currentStructure)
+      ) {
+        throw new Error(
+          `La struttura della tabella "${table}" non è compatibile con questa versione dell'app.`,
+        );
+      }
+    }
+
+    // Ripristina il database.
+    await SQLite.backupDatabaseAsync({
+      sourceDatabase: importedDb,
+      destDatabase: db,
+      sourceDatabaseName: "main",
+      destDatabaseName: "main",
+    });
+  } finally {
+    await importedDb.closeAsync();
+  }
 }
 
 export async function isTvSeriesSaved(tmdbId: number): Promise<boolean> {
