@@ -6,13 +6,19 @@ import type { HubList, HubListItem } from "@/database";
 import { TMDB_IMAGE_BASE_URL } from "@/services/tmdb";
 import { colors } from "@/styles/global";
 import { getMediaCardLayout } from "@/utils/mediaLayout";
+import { Ionicons } from "@expo/vector-icons";
 
 type ListCardProps = {
   list: HubList & { items: HubListItem[] };
   onPress: () => void;
+  onMenuPress?: () => void;
 };
 
-export default function ListCard({ list, onPress }: ListCardProps) {
+export default function ListCard({
+  list,
+  onPress,
+  onMenuPress,
+}: ListCardProps) {
   const { width } = useWindowDimensions();
 
   const { listPosterWidth, listPosterHeight, listCardWidth } =
@@ -31,6 +37,29 @@ export default function ListCard({ list, onPress }: ListCardProps) {
         overflow: "hidden",
       }}
     >
+      {onMenuPress && (
+        <Pressable
+          onPress={(event) => {
+            event.stopPropagation();
+            onMenuPress();
+          }}
+          hitSlop={8}
+          style={{
+            position: "absolute",
+            top: 8,
+            right: 8,
+            zIndex: 2,
+            width: 34,
+            height: 34,
+            borderRadius: 17,
+            backgroundColor: "rgba(0,0,0,0.7)",
+            justifyContent: "center",
+            alignItems: "center",
+          }}
+        >
+          <Ionicons name="ellipsis-vertical" size={20} color="#FFFFFF" />
+        </Pressable>
+      )}
       <View
         style={{
           flexDirection: "row",

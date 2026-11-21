@@ -481,10 +481,7 @@ export default function MovieDetails() {
   }
 
   function handleAddToList() {
-    Alert.alert(
-      "Liste",
-      "La gestione delle liste sarà disponibile in seguito.",
-    );
+    router.push("/lists");
   }
 
   function handleViewRewatches() {

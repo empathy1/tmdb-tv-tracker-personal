@@ -81,9 +81,10 @@ export async function saveMovieDetails(
       backdrop_path,
       overview,
       release_date,
-      runtime
+      runtime,
+      created_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(tmdb_id) DO UPDATE SET
       runtime = COALESCE(excluded.runtime, movies.runtime)`,
     details.id,
@@ -2186,6 +2187,12 @@ export type HubListItem = {
   backdrop_path: string | null;
   added_at: string;
   custom_order: number;
+  created_at: string;
+  watch_status: string | null;
+  is_watched: number | null;
+  first_air_date: string | null;
+  release_date: string | null;
+  status: string | null;
 };
 
 export async function getHubLists(): Promise<HubList[]> {
@@ -2213,6 +2220,12 @@ export async function getHubListItems(listId: string): Promise<HubListItem[]> {
        COALESCE(s.title, m.title, l.name) AS title,
        COALESCE(s.poster_path, m.poster_path) AS poster_path,
        COALESCE(s.backdrop_path, m.backdrop_path) AS backdrop_path,
+       COALESCE(s.created_at, m.created_at) AS created_at,
+        s.watch_status,
+        s.status AS status,
+        m.is_watched,
+        s.first_air_date,
+        m.release_date,
        l.added_at,
        l.custom_order
      FROM liste l
@@ -2226,4 +2239,108 @@ export async function getHubListItems(listId: string): Promise<HubListItem[]> {
      ORDER BY l.custom_order ASC, l.added_at DESC`,
     listId,
   );
+}
+
+export async function createHubList(name: string): Promise<void> {
+  const db = await getDatabase();
+
+  const normalizedName = name.trim();
+
+  if (!normalizedName) {
+    throw new Error("Inserisci un nome per la lista.");
+  }
+
+  const baseId = normalizedName
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  if (!baseId) {
+    throw new Error("Il nome della lista non è valido.");
+  }
+
+  const existing = await db.getFirstAsync<{ list_id: string }>(
+    `SELECT list_id
+     FROM elenco_liste
+     WHERE name = ? COLLATE NOCASE`,
+    normalizedName,
+  );
+
+  if (existing) {
+    throw new Error("Esiste già una lista con questo nome.");
+  }
+
+  let listId = baseId;
+  let suffix = 2;
+
+  while (
+    await db.getFirstAsync<{ list_id: string }>(
+      "SELECT list_id FROM elenco_liste WHERE list_id = ?",
+      listId,
+    )
+  ) {
+    listId = `${baseId}_${suffix}`;
+    suffix++;
+  }
+
+  await db.runAsync(
+    `INSERT INTO elenco_liste (list_id, name)
+     VALUES (?, ?)`,
+    listId,
+    normalizedName,
+  );
+}
+
+export async function renameHubList(
+  listId: string,
+  newName: string,
+): Promise<void> {
+  const db = await getDatabase();
+
+  const normalizedName = newName.trim();
+
+  if (!normalizedName) {
+    throw new Error("Inserisci un nome per la lista.");
+  }
+
+  const existing = await db.getFirstAsync<{ list_id: string }>(
+    `SELECT list_id
+     FROM elenco_liste
+     WHERE name = ? COLLATE NOCASE
+       AND list_id != ?`,
+    normalizedName,
+    listId,
+  );
+
+  if (existing) {
+    throw new Error("Esiste già una lista con questo nome.");
+  }
+
+  const result = await db.runAsync(
+    `UPDATE elenco_liste
+     SET name = ?
+     WHERE list_id = ?`,
+    normalizedName,
+    listId,
+  );
+
+  if (result.changes === 0) {
+    throw new Error("La lista da rinominare non esiste.");
+  }
+}
+
+export async function deleteHubList(listId: string): Promise<void> {
+  const db = await getDatabase();
+
+  const result = await db.runAsync(
+    `DELETE FROM elenco_liste
+     WHERE list_id = ?`,
+    listId,
+  );
+
+  if (result.changes === 0) {
+    throw new Error("La lista da eliminare non esiste.");
+  }
 }

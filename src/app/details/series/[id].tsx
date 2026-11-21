@@ -495,11 +495,7 @@ export default function SeriesDetails() {
   );
 
   function handleAddToList() {
-    Alert.alert(
-      "Liste",
-      "La gestione delle liste sarà disponibile prossimamente.",
-      [{ text: "OK" }],
-    );
+    router.push("/lists");
   }
 
   async function handleToggleFavorite(): Promise<boolean> {

@@ -715,6 +715,7 @@ export default function HubScreen() {
             onListPress={(list) => {
               console.log("Lista selezionata:", list.list_id);
             }}
+            onTitlePress={() => router.push("/lists")}
           />
         </View>
 

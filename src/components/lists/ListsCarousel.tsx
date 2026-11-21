@@ -1,25 +1,47 @@
-import { Text, useWindowDimensions, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { Pressable, Text, useWindowDimensions, View } from "react-native";
 import PagerView from "react-native-pager-view";
 
 import type { HubList, HubListItem } from "@/database";
-import { globalStyles } from "@/styles/global";
+import { colors, globalStyles } from "@/styles/global";
 import { getMediaCardLayout } from "@/utils/mediaLayout";
 import ListCard from "./ListCard";
 
 type ListsCarouselProps = {
   lists: (HubList & { items: HubListItem[] })[];
   onListPress: (list: HubList) => void;
+  onTitlePress: () => void;
 };
+
 export default function ListsCarousel({
   lists,
   onListPress,
+  onTitlePress,
 }: ListsCarouselProps) {
   const { width } = useWindowDimensions();
   const { listPosterHeight } = getMediaCardLayout(width, false, true);
 
   return (
     <View>
-      <Text style={globalStyles.sectionTitle}>Le mie liste</Text>
+      <Pressable
+        onPress={onTitlePress}
+        style={{
+          flexDirection: "row",
+          alignItems: "flex-start",
+          alignSelf: "flex-start",
+        }}
+      >
+        <Text style={globalStyles.sectionTitle}>Le mie liste</Text>
+        <Ionicons
+          name="chevron-forward"
+          size={18}
+          color={colors.textSecondary}
+          style={{
+            marginLeft: 5,
+            marginTop: 2,
+          }}
+        />
+      </Pressable>
 
       <PagerView
         style={{ width: "100%", height: listPosterHeight }}

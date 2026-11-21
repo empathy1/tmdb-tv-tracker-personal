@@ -1332,3 +1332,168 @@ Importazione:
 - Scompare prima dell'avviso di completamento o di errore.
 Abbiamo riutilizzato lo stato isDatabaseLoading per entrambe le operazioni.
 
+## Riepilogo del lavoro di oggi – 21 novembre 2026
+Oggi abbiamo lavorato soprattutto sulla gestione delle liste personali dell'app, partendo dalla creazione della schermata di dettaglio di una lista e arrivando alla ricerca, ai filtri e agli ordinamenti.
+### 1. Creazione della sezione «Le mie liste»
+Abbiamo completato la navigazione dalla Home/Hub alla sezione dedicata alle liste.
+- Creato il percorso src/app/lists/index.tsx.
+- Modificato ListsCarousel.tsx per rendere cliccabile il titolo Le mie liste.
+- Aggiunto il chevron per indicare che il titolo permette di accedere a un'altra schermata.
+- Collegato il titolo alla navigazione verso /lists.
+- Sistemato l'allineamento verticale del chevron.
+### 2. Gestione delle liste
+Abbiamo completato le funzioni per gestire le liste nel database:
+- createHubList: creazione di una lista.
+- renameHubList: rinomina.
+- deleteHubList: eliminazione.
+La creazione gestisce anche la normalizzazione del nome e gli eventuali duplicati, generando identificativi distinti.
+
+Nella schermata src/app/lists/index.tsx abbiamo poi realizzato:
+- Caricamento delle liste dal database.
+- Visualizzazione tramite ListCard.
+- Pulsante per creare una nuova lista, riutilizzando AddMediaButton.
+- Bottom sheet per la creazione.
+- Bottom sheet per la rinomina.
+- Bottom sheet per le opzioni della lista.
+- Navigazione al dettaglio della lista selezionata.
+### 3. Creazione del dettaglio della lista
+Abbiamo creato:
+
+src/app/lists/[id].tsx
+
+La schermata recupera la lista selezionata e i relativi elementi tramite getHubLists() e getHubListItems(id).
+
+Abbiamo aggiunto:
+- Titolo della lista.
+- Numero di elementi.
+- Visualizzazione delle serie e dei film tramite MediaCard.
+- Navigazione al dettaglio della rispettiva serie o del film.
+- Ricerca locale per titolo.
+Abbiamo inoltre adattato i dati recuperati dal database, aggiornando HubListItem e la query di getHubListItems per includere:
+- created_at
+- watch_status
+- is_watched
+- first_air_date
+- release_date
+- status
+Non abbiamo introdotto nuove migrazioni: per movies.created_at hai aggiunto direttamente il campo alla tabella.
+### 4. Filtri del dettaglio lista
+Abbiamo implementato un pulsante Filtri che apre un BottomSheetModal.
+
+Il pannello contiene quattro gruppi.
+
+Tipologia
+- Tutti
+- Serie TV
+- Film
+Stato delle serie
+- Da iniziare
+- In corso
+- Completata
+- Interrotta
+- Da guardare più tardi
+Status Produzione
+- In programmazione
+- Pianificata
+- In produzione
+- Terminata
+- Cancellata
+- Pilot
+Stato dei film
+- Tutti
+- Visto
+- Non visto
+Abbiamo mantenuto separati lo stato personale di visione (watch_status) e lo stato di produzione proveniente da TMDB (status).
+
+In particolare, abbiamo deciso di applicare i filtri sullo stato personale soltanto alle serie, perché i film non hanno un campo equivalente.
+Barra dei filtri attivi
+Abbiamo aggiunto una barra nella parte inferiore della schermata che mostra i filtri selezionati per lo stato delle serie e lo Status Produzione.
+
+Ogni filtro è rappresentato da un'etichetta con una X, che permette di rimuoverlo singolarmente.
+Correzione del filtro Status Produzione
+Alla fine abbiamo individuato e corretto un problema: il filtro Status Produzione, se utilizzato da solo, non funzionava correttamente.
+
+La causa era la condizione che considerava automaticamente soddisfatto il filtro sullo stato personale quando non era selezionato.
+
+Abbiamo corretto la logica in modo che:
+- Solo Stato delle serie: viene applicato quel filtro.
+- Solo Status Produzione: viene applicato quel filtro.
+- Entrambi: i due gruppi funzionano in OR.
+- Nessuno dei due: non viene applicato alcun filtro sullo stato delle serie.
+### 5. Ordinamento degli elementi
+Abbiamo aggiunto un secondo Bottom Sheet per scegliere l'ordinamento.
+
+Le opzioni disponibili sono:
+- Titolo (A–Z)
+- Titolo (Z–A)
+- Data aggiunta
+- Data di uscita
+Per la data di uscita utilizziamo first_air_date per le serie e release_date per i film.
+
+Abbiamo anche:
+- Posizionato Ordina per a sinistra.
+- Spostato il conteggio degli elementi filtrati a destra.
+- Aggiunto l'ordinamento alfabetico inverso.
+- Aggiornato le etichette mostrate in base alla selezione.
+- Impostato il reset sull'ordinamento predefinito Titolo (A–Z).
+
+## Riepilogo del lavoro – 21 novembre 2026
+Questa sera abbiamo proseguito lo sviluppo della sezione Le mie liste della tua app TV Tracker.
+
+### 1. Dettaglio della lista
+Abbiamo completato e rifinito la schermata src/app/lists/[id].tsx.
+
+Funzionalità presenti:
+- Visualizzazione degli elementi della lista, sia serie TV che film.
+- Ricerca per titolo.
+- Filtri per tipologia.
+- Filtri per stato personale di visione delle serie.
+- Filtri per stato di produzione delle serie.
+- Filtri per stato di visione dei film.
+- Possibilità di rimuovere singolarmente i filtri attivi.
+- Ordinamento per:
+  - Titolo A–Z.
+  - Titolo Z–A.
+  - Data di aggiunta, più recenti.
+  - Data di aggiunta, meno recenti.
+  - Data di uscita, più recenti.
+  - Data di uscita, meno recenti.
+Abbiamo inoltre:
+- Sistemato l'allineamento orizzontale delle card.
+- Spostato Reset e Filtri a sinistra di Ordina per.
+- Lasciato il conteggio degli elementi filtrati sulla destra.
+- Aggiunto il pulsante Aggiungi/Rimuovi elementi su una riga dedicata, sfruttando AddMediaButton.
+### 2. Nuova schermata Aggiungi/Rimuovi elementi
+Abbiamo iniziato la nuova schermata:
+
+src/app/lists/[id]/manage.tsx
+
+Per ora abbiamo:
+- Creato la route Expo Router.
+- Verificato che la navigazione dal dettaglio della lista funzioni.
+- Implementato il recupero dei dati della lista tramite getHubLists().
+- Recuperato il nome della lista da mostrare nella schermata.
+- Aggiunto il titolo e il pulsante per tornare indietro.
+La schermata è ancora provvisoria: dobbiamo implementare la ricerca TMDB e le operazioni di aggiunta e rimozione degli elementi.
+### 3. Servizi TMDB
+In src/services/tmdb.ts abbiamo aggiunto due nuove funzioni:
+- getPopularTv()
+- getPopularMovies()
+Serviranno per mostrare contenuti popolari appena si apre la nuova schermata, senza obbligare l'utente a inserire una ricerca.
+
+Abbiamo deciso di mantenere questa modifica separata dalla schermata Search esistente: in futuro aggiorneremo anche quella per mostrare contenuti iniziali.
+### 4. Stili globali
+Abbiamo iniziato a uniformare l'utilizzo di globalStyles, evitando di definire ripetutamente gli stessi stili inline.
+
+In particolare, abbiamo deciso di utilizzare globalStyles.screenTitle per tutti i titoli principali delle schermate.
+
+Modifiche effettuate:
+- src/app/lists/index.tsx
+- src/app/lists/[id].tsx
+- src/app/lists/[id]/manage.tsx
+I titoli ora utilizzano tutti:
+- Dimensione: 18 px
+- Peso: 700
+- Colore: colors.text
+Abbiamo lasciato invariato globalStyles.title (24 px), che potrà essere utilizzato per altri elementi.
+

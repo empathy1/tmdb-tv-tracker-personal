@@ -25,7 +25,7 @@ export default function AddMediaButton({
         borderRadius: 30,
         backgroundColor: loading ? "#666" : colors.continuing,
         alignItems: "center",
-        marginTop: spacing.xl,
+        marginBottom: spacing.xl,
         opacity: loading ? 0.8 : 1,
       }}
     >
