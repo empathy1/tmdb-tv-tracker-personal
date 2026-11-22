@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
+  RefreshControl,
   ScrollView,
   Text,
   TextInput,
@@ -11,15 +12,14 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
+  getTrendingMovies,
+  getTrendingTv,
   searchMovie,
   searchTv,
   TMDB_IMAGE_BASE_URL,
 } from "@/services/tmdb";
 
-import type {
-  TMDBMovieSearchResult,
-  TMDBTvSearchResult,
-} from "@/types/tmdb";
+import type { TMDBMovieSearchResult, TMDBTvSearchResult } from "@/types/tmdb";
 
 import MediaCard from "@/components/MediaCard";
 import { spacing } from "@/constants/theme";
@@ -42,10 +42,7 @@ export default function Search() {
   const insets = useSafeAreaInsets();
 
   const { width: screenWidth } = useWindowDimensions();
-  const { gap, containerPadding } = getMediaCardLayout(
-    screenWidth,
-    false,
-  );
+  const { gap, containerPadding } = getMediaCardLayout(screenWidth, false);
   const router = useRouter();
   const { titleLanguage } = useTitleLanguage();
   const [query, setQuery] = useState("");
@@ -55,12 +52,19 @@ export default function Search() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  function onRefresh() {
+    setRefreshing(true);
+    setRefreshKey((current) => current + 1);
+  }
+
   useEffect(() => {
     const trimmedQuery = query.trim();
 
     if (!trimmedQuery) {
-      setResults([]);
-      setError(null);
+      loadTrending();
       return;
     }
 
@@ -69,7 +73,76 @@ export default function Search() {
     }, 500);
 
     return () => clearTimeout(timeout);
-  }, [query, filter, titleLanguage]);
+  }, [query, filter, titleLanguage, refreshKey]);
+
+  async function loadTrending() {
+    try {
+      setLoading(true);
+      setError(null);
+
+      let items: SearchItem[] = [];
+
+      if (filter === "series") {
+        const data = await getTrendingTv(titleLanguage);
+
+        items = data.results.map((item) => ({
+          id: item.id,
+          title: item.name,
+          poster: item.poster_path
+            ? `${TMDB_IMAGE_BASE_URL}${item.poster_path}`
+            : null,
+          year: item.first_air_date ? item.first_air_date.slice(0, 4) : "",
+          type: "series",
+        }));
+      } else if (filter === "movies") {
+        const data = await getTrendingMovies(titleLanguage);
+
+        items = data.results.map((item) => ({
+          id: item.id,
+          title: item.title,
+          poster: item.poster_path
+            ? `${TMDB_IMAGE_BASE_URL}${item.poster_path}`
+            : null,
+          year: item.release_date ? item.release_date.slice(0, 4) : "",
+          type: "movie",
+        }));
+      } else {
+        const [seriesData, movieData] = await Promise.all([
+          getTrendingTv(titleLanguage),
+          getTrendingMovies(titleLanguage),
+        ]);
+
+        items = [
+          ...seriesData.results.map((item) => ({
+            id: item.id,
+            title: item.name,
+            poster: item.poster_path
+              ? `${TMDB_IMAGE_BASE_URL}${item.poster_path}`
+              : null,
+            year: item.first_air_date ? item.first_air_date.slice(0, 4) : "",
+            type: "series" as const,
+          })),
+          ...movieData.results.map((item) => ({
+            id: item.id,
+            title: item.title,
+            poster: item.poster_path
+              ? `${TMDB_IMAGE_BASE_URL}${item.poster_path}`
+              : null,
+            year: item.release_date ? item.release_date.slice(0, 4) : "",
+            type: "movie" as const,
+          })),
+        ];
+      }
+
+      setResults(items);
+    } catch (e) {
+      setError("Errore durante il caricamento dei contenuti.");
+      setResults([]);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }
 
   async function loadResults(searchQuery: string) {
     try {
@@ -87,9 +160,7 @@ export default function Search() {
           poster: item.poster_path
             ? `${TMDB_IMAGE_BASE_URL}${item.poster_path}`
             : null,
-          year: item.first_air_date
-            ? item.first_air_date.slice(0, 4)
-            : "",
+          year: item.first_air_date ? item.first_air_date.slice(0, 4) : "",
           type: "series",
         }));
       } else if (filter === "movies") {
@@ -101,9 +172,7 @@ export default function Search() {
           poster: item.poster_path
             ? `${TMDB_IMAGE_BASE_URL}${item.poster_path}`
             : null,
-          year: item.release_date
-            ? item.release_date.slice(0, 4)
-            : "",
+          year: item.release_date ? item.release_date.slice(0, 4) : "",
           type: "movie",
         }));
       } else {
@@ -118,9 +187,7 @@ export default function Search() {
           poster: item.poster_path
             ? `${TMDB_IMAGE_BASE_URL}${item.poster_path}`
             : null,
-          year: item.first_air_date
-            ? item.first_air_date.slice(0, 4)
-            : "",
+          year: item.first_air_date ? item.first_air_date.slice(0, 4) : "",
           type: "series",
         }));
 
@@ -130,9 +197,7 @@ export default function Search() {
           poster: item.poster_path
             ? `${TMDB_IMAGE_BASE_URL}${item.poster_path}`
             : null,
-          year: item.release_date
-            ? item.release_date.slice(0, 4)
-            : "",
+          year: item.release_date ? item.release_date.slice(0, 4) : "",
           type: "movie",
         }));
 
@@ -145,6 +210,7 @@ export default function Search() {
       setResults([]);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }
 
@@ -158,9 +224,7 @@ export default function Search() {
         },
       ]}
     >
-      <Text style={globalStyles.screenTitle}>
-        Search
-      </Text>
+      <Text style={globalStyles.screenTitle}>Search</Text>
 
       <TextInput
         value={query}
@@ -168,10 +232,7 @@ export default function Search() {
         placeholder="Cerca..."
         placeholderTextColor={colors.textSecondary}
         autoCapitalize="none"
-        style={[
-          globalStyles.searchInput,
-          { marginTop: spacing.lg },
-        ]}
+        style={[globalStyles.searchInput, { marginTop: spacing.lg }]}
       />
 
       <View style={globalStyles.filterRow}>
@@ -212,16 +273,10 @@ export default function Search() {
         />
       )}
 
-      {error && (
-        <Text style={globalStyles.empty}>
-          {error}
-        </Text>
-      )}
+      {error && <Text style={globalStyles.empty}>{error}</Text>}
 
       {!loading && !error && query.trim() !== "" && results.length === 0 && (
-        <Text style={globalStyles.empty}>
-          Nessun risultato.
-        </Text>
+        <Text style={globalStyles.empty}>Nessun risultato.</Text>
       )}
 
       <ScrollView
@@ -229,6 +284,14 @@ export default function Search() {
         contentContainerStyle={{
           paddingBottom: insets.bottom + 65,
         }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
       >
         <View
           style={{
@@ -240,9 +303,7 @@ export default function Search() {
           {results.map((item) => {
             const info =
               item.year !== "" ? (
-                <Text style={globalStyles.caption}>
-                  {item.year}
-                </Text>
+                <Text style={globalStyles.caption}>{item.year}</Text>
               ) : null;
 
             return (

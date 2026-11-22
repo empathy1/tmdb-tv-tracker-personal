@@ -59,7 +59,7 @@ import {
   saveTvSeasonEpisodes,
   saveTvSeriesDetails,
   updateSeasonFirstWatchDate,
-  updateTvSeriesWatchStatus,
+  updateTvSeriesWatchStatus
 } from "@/database";
 import { invalidateCalendarCache } from "@/services/calendarCache";
 import {
@@ -67,6 +67,11 @@ import {
   getBottomActionContainerStyle,
   globalStyles,
 } from "@/styles/global";
+import {
+  getSeriesProgressColor,
+  getWatchedEpisodesCount,
+  isAirDateUpcoming,
+} from "@/utils/seriesProgress";
 import {
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
@@ -120,19 +125,6 @@ type SeriesDetailItem = {
   seasons: TMDBTvDetails["seasons"];
   nextEpisodeToAir: TMDBTvDetails["next_episode_to_air"];
 };
-
-function isAirDateUpcoming(airDate: string | null | undefined): boolean {
-  if (!airDate) return false;
-
-  const today = new Date();
-  const todayString = [
-    today.getFullYear(),
-    String(today.getMonth() + 1).padStart(2, "0"),
-    String(today.getDate()).padStart(2, "0"),
-  ].join("-");
-
-  return airDate > todayString;
-}
 
 export default function SeriesDetails() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -495,7 +487,14 @@ export default function SeriesDetails() {
   );
 
   function handleAddToList() {
-    router.push("/lists");
+    router.push({
+      pathname: "/lists",
+      params: {
+        mode: "select",
+        itemType: "series",
+        tmdbId: String(id),
+      },
+    });
   }
 
   async function handleToggleFavorite(): Promise<boolean> {
@@ -1297,14 +1296,10 @@ export default function SeriesDetails() {
     }
   }
 
-  const watchedEpisodes = availableEpisodes.filter((availableEpisode) =>
-    episodeHistory.some(
-      (episode) =>
-        episode.season_number === availableEpisode.season_number &&
-        episode.episode_number === availableEpisode.episode_number &&
-        episode.is_watched === 1,
-    ),
-  ).length;
+  const watchedEpisodes = getWatchedEpisodesCount(
+    availableEpisodes,
+    episodeHistory,
+  );
 
   const totalEpisodes = availableEpisodes.length;
 
@@ -1371,21 +1366,7 @@ export default function SeriesDetails() {
     [],
   );
 
-  const seriesProgressColor =
-    details?.status === "Returning Series"
-      ? colors.completed
-      : details?.status === "Ended" || details?.status === "Canceled"
-        ? colors.ended
-        : null;
-
-  const progressBarColor =
-    watchStatus === "continuing"
-      ? colors.continuing
-      : watchStatus === "stopped"
-        ? colors.stopped
-        : watchStatus === "up_to_date"
-          ? (seriesProgressColor ?? colors.completed)
-          : colors.progressBackground;
+  const progressBarColor = getSeriesProgressColor(watchStatus, details?.status);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>

@@ -1497,3 +1497,87 @@ I titoli ora utilizzano tutti:
 - Colore: colors.text
 Abbiamo lasciato invariato globalStyles.title (24 px), che potrà essere utilizzato per altri elementi.
 
+## Riepilogo lavori di oggi – TV Tracker
+22 novembre 2026
+
+Oggi abbiamo lavorato principalmente sulla sezione Hub, sulle liste personalizzate e sulla nuova gestione delle serie e dei film preferiti.
+### 1. Liste personalizzate
+- Analizzata la struttura delle tabelle elenco_liste e liste.
+- Verificato il funzionamento di addHubListItem() per aggiungere serie e film alle liste.
+- Esaminato il comportamento delle liste automatiche:
+  - Archivio
+  - Watchlist
+  - Droppate
+- Chiarito come vengono sincronizzati gli elementi quando cambia il loro stato di visione.
+- Verificato come vengono recuperati e ordinati gli elementi delle liste.
+### 2. Sezioni dei preferiti nell'Hub
+Abbiamo lavorato sulle sezioni:
+- Serie preferite
+- Film preferiti
+Modifiche effettuate:
+- Limitato a 5 elementi il numero di card mostrate nell'Hub.
+- Aggiunto il supporto a showMore e onMorePress in HorizontalMediaList.
+- Resa cliccabile l'intera riga del titolo, come già avviene per la sezione Le mie liste.
+- Preparata la navigazione verso una pagina dedicata con tutti i preferiti.
+### 3. Dettaglio dei preferiti
+Abbiamo iniziato a riutilizzare la schermata esistente src/app/lists/[id].tsx, evitando di creare pagine separate.
+
+La schermata ora distingue tre modalità:
+Modalità	Parametri
+Lista normale	id
+Serie preferite	id=favorites, type=series
+Film preferiti	id=favorites, type=movie
+
+Abbiamo inoltre:
+- Importato getFavoriteSeries() e getFavoriteMovies().
+- Recuperato i preferiti direttamente dalla tabella preferiti, collegandoli rispettivamente alle tabelle series e movies.
+- Convertito i risultati nel formato HubListItem[], così da riutilizzare la struttura della schermata esistente.
+- Aggiunto il titolo dinamico: Serie preferite oppure Film preferiti.
+- Aggiornato le dipendenze di loadList() per tenere conto anche del parametro type.
+### 4. Gestione dei preferiti nel database
+Abbiamo individuato le funzioni già presenti nel database:
+- isTvSeriesFavorite()
+- isMovieFavorite()
+- addTvSeriesFavorite()
+- removeTvSeriesFavorite()
+- addMovieFavorite()
+- removeMovieFavorite()
+Queste ci permetteranno di gestire i preferiti senza dover creare una nuova struttura nel database.
+
+## Riepilogo del 22 novembre 2026 - sera
+Per il dettaglio delle liste e dei preferiti abbiamo completato:
+- Navigazione dalle sezioni dell'Hub.
+- Intestazioni uniformate con lo chevron a destra.
+- Filtri distinti per serie e film.
+- Etichette dei filtri attivi, compresa quella dei film.
+- Ordinamento già compatibile con le pagine dei preferiti.
+
+Abbiamo completato e verificato diverse modifiche alla gestione delle liste e dei preferiti nell'app.
+1. Sezione «Le mie liste» nell'Hub
+- Nascoste dalla sezione le quattro liste automatiche:
+  - Archivio
+  - Droppate
+  - Watchlist
+  - Archiviati
+- Le liste automatiche rimangono nel database e continuano a funzionare normalmente.
+- Nell'Hub vengono mostrate soltanto le liste personalizzate create dall'utente.
+2. Ordinamento nella schermata «Le mie liste»
+Abbiamo modificato src/app/lists/index.tsx per stabilire un ordine preciso:
+1. Archivio
+2. Droppate
+3. Watchlist
+4. Archiviati
+5. Tutte le liste personalizzate
+Abbiamo introdotto la funzione sortHubLists() e applicato l'ordinamento dopo le operazioni di creazione, rinomina, eliminazione e caricamento delle liste.
+
+Verificato
+ L'ordinamento funziona correttamente.
+3. Carosello delle liste nell'Hub
+Abbiamo analizzato il comportamento dello scorrimento orizzontale di ListsCarousel.tsx.
+- Verificata la struttura di PagerView.
+- Controllato il calcolo delle dimensioni in getMediaCardLayout().
+- Esaminato il componente ListCard.tsx.
+- Provate alcune modifiche alle dimensioni e alla spaziatura delle pagine.
+Il problema dello spazio visivo tra le card non è stato risolto. Abbiamo quindi deciso di mantenere il componente nella sua versione originale, senza restringere le card o introdurre modifiche che non ti convincono.
+
+

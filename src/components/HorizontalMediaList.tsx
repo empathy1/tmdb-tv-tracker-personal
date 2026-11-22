@@ -1,11 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useState } from "react";
 import {
-    FlatList,
-    Pressable,
-    Text,
-    View,
-    type ListRenderItem,
+  FlatList,
+  Pressable,
+  Text,
+  View,
+  type ListRenderItem,
 } from "react-native";
 
 import { colors, globalStyles } from "@/styles/global";
@@ -39,29 +39,47 @@ export default function HorizontalMediaList<T>({
 
   return (
     <View style={{ marginTop: 30 }}>
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 5,
-        }}
-      >
-        <Text
-          style={[
-            globalStyles.title,
-            { fontSize: 18, marginTop: 10, marginBottom: 5 },
-          ]}
+      {showMore && data.length > 0 ? (
+        <Pressable
+          onPress={onMorePress}
+          hitSlop={10}
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 5,
+          }}
         >
-          {title}
-        </Text>
+          <Text
+            style={[
+              globalStyles.title,
+              { fontSize: 18, marginTop: 10, marginBottom: 5 },
+            ]}
+          >
+            {title}
+          </Text>
 
-        {showMore && data.length > 0 && (
-          <Pressable onPress={onMorePress} hitSlop={10}>
-            <Ionicons name="chevron-forward" size={18} color={colors.text} />
-          </Pressable>
-        )}
-      </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.text} />
+        </Pressable>
+      ) : (
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 5,
+          }}
+        >
+          <Text
+            style={[
+              globalStyles.title,
+              { fontSize: 18, marginTop: 10, marginBottom: 5 },
+            ]}
+          >
+            {title}
+          </Text>
+        </View>
+      )}
 
       {data.length === 0 ? (
         emptyMessage ? (

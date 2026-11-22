@@ -1,4 +1,4 @@
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -13,11 +13,14 @@ import {
 import AddMediaButton from "@/components/AddMediaButton";
 import ListCard from "@/components/lists/ListCard";
 import { spacing } from "@/constants/theme";
+import { useTitleLanguage } from "@/contexts/LanguageContext";
 import {
+  addHubListItem,
   createHubList,
   deleteHubList,
   getHubListItems,
   getHubLists,
+  removeHubListItem,
   renameHubList,
   type HubList,
   type HubListItem,
@@ -38,10 +41,36 @@ type ListWithItems = HubList & {
   items: HubListItem[];
 };
 
+function sortHubLists(lists: ListWithItems[]): ListWithItems[] {
+  const automaticOrder = ["Archivio", "Droppate", "Watchlist", "Archiviati"];
+
+  return [...lists].sort((a, b) => {
+    const indexA = automaticOrder.indexOf(a.name);
+    const indexB = automaticOrder.indexOf(b.name);
+
+    if (indexA === -1 && indexB === -1) return 0;
+    if (indexA === -1) return -1;
+    if (indexB === -1) return 1;
+
+    return indexA - indexB;
+  });
+}
+
 export default function MyListsScreen() {
   const [lists, setLists] = useState<ListWithItems[]>([]);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
+
+  const { mode, itemType, tmdbId } = useLocalSearchParams<{
+    mode?: string;
+    itemType?: "series" | "movie";
+    tmdbId?: string;
+  }>();
+
+  const isSelectingMedia = mode === "select" && !!itemType && !!tmdbId;
+
+  const { titleLanguage } = useTitleLanguage();
+
   const insets = useSafeAreaInsets();
   const addListSheetRef = useRef<BottomSheetModal>(null);
   const [newListName, setNewListName] = useState("");
@@ -77,7 +106,7 @@ export default function MyListsScreen() {
         })),
       );
 
-      setLists(listsWithItems);
+      setLists(sortHubLists(listsWithItems));
       setNewListName("");
       addListSheetRef.current?.dismiss();
     } catch (error) {
@@ -114,7 +143,7 @@ export default function MyListsScreen() {
         })),
       );
 
-      setLists(listsWithItems);
+      setLists(sortHubLists(listsWithItems));
       renameListSheetRef.current?.dismiss();
     } catch (error) {
       Alert.alert(
@@ -155,7 +184,7 @@ export default function MyListsScreen() {
                 })),
               );
 
-              setLists(listsWithItems);
+              setLists(sortHubLists(listsWithItems));
               setSelectedList(null);
             } catch (error) {
               Alert.alert(
@@ -201,7 +230,7 @@ export default function MyListsScreen() {
           );
 
           if (isActive) {
-            setLists(listsWithItems);
+            setLists(sortHubLists(listsWithItems));
           }
         } catch (error) {
           console.error("Errore durante il caricamento delle liste:", error);
@@ -220,61 +249,117 @@ export default function MyListsScreen() {
     }, []),
   );
 
+  async function handleToggleList(list: ListWithItems) {
+    if (!itemType || !tmdbId) return;
+
+    const mediaId = Number(tmdbId);
+
+    const isAlreadyInList = list.items.some(
+      (item) => item.item_type === itemType && item.tmdb_id === mediaId,
+    );
+
+    try {
+      if (isAlreadyInList) {
+        await removeHubListItem(list.list_id, itemType, mediaId);
+      } else {
+        await addHubListItem(list.list_id, itemType, mediaId, titleLanguage);
+      }
+
+      const updatedItems = await getHubListItems(list.list_id);
+
+      setLists((currentLists) =>
+        currentLists.map((currentList) =>
+          currentList.list_id === list.list_id
+            ? {
+                ...currentList,
+                items: updatedItems,
+                item_count: updatedItems.length,
+              }
+            : currentList,
+        ),
+      );
+    } catch {
+      Alert.alert("Errore", "Non è stato possibile aggiornare la lista.");
+    }
+  }
+
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={{
-        paddingHorizontal: containerPadding,
-        paddingTop: insets.top + 16,
-        paddingBottom: 16,
-      }}
-    >
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
       <View
         style={{
-          flexDirection: "row",
-          alignItems: "center",
-          marginBottom: 20,
+          paddingHorizontal: containerPadding,
+          paddingTop: insets.top + 16,
         }}
       >
-        <Pressable
-          onPress={() => router.back()}
-          hitSlop={10}
-          style={{ marginRight: 12 }}
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            marginBottom: 20,
+          }}
         >
-          <Ionicons name="arrow-back" size={18} color={colors.text} />
-        </Pressable>
+          <Pressable
+            onPress={() => router.back()}
+            hitSlop={10}
+            style={{ marginRight: 12 }}
+          >
+            <Ionicons name="arrow-back" size={18} color={colors.text} />
+          </Pressable>
 
-        <Text style={globalStyles.screenTitle}>Le mie liste</Text>
+          <Text style={globalStyles.screenTitle}>Le mie liste</Text>
+        </View>
+
+        <AddMediaButton
+          label="+ Aggiungi una nuova lista"
+          loading={false}
+          onPress={() => {
+            setNewListName("");
+            addListSheetRef.current?.present();
+          }}
+        />
       </View>
-      <AddMediaButton
-        label="+ Aggiungi una nuova lista"
-        loading={false}
-        onPress={() => {
-          setNewListName("");
-          addListSheetRef.current?.present();
-        }}
-      />
 
-      {loading ? (
-        <ActivityIndicator color={colors.primary} />
-      ) : (
-        lists.map((list) => (
-          <ListCard
-            key={list.list_id}
-            list={list}
-            onPress={() =>
-              router.push({
-                pathname: "../lists/[id]",
-                params: { id: list.list_id },
-              })
-            }
-            onMenuPress={() => {
-              setSelectedList(list);
-              listOptionsSheetRef.current?.present();
-            }}
-          />
-        ))
-      )}
+      <ScrollView
+        contentContainerStyle={{
+          paddingHorizontal: containerPadding,
+          paddingTop: 8,
+          paddingBottom: 16,
+        }}
+      >
+        {loading ? (
+          <ActivityIndicator color={colors.primary} />
+        ) : (
+          lists.map((list) => (
+            <ListCard
+              key={list.list_id}
+              list={list}
+              selectionMode={isSelectingMedia}
+              isSelected={
+                !!itemType &&
+                !!tmdbId &&
+                list.items.some(
+                  (item) =>
+                    item.item_type === itemType &&
+                    item.tmdb_id === Number(tmdbId),
+                )
+              }
+              onToggleSelect={() => handleToggleList(list)}
+              onPress={() => {
+                if (!isSelectingMedia) {
+                  router.push({
+                    pathname: "../lists/[id]",
+                    params: { id: list.list_id },
+                  });
+                }
+              }}
+              onMenuPress={() => {
+                setSelectedList(list);
+                listOptionsSheetRef.current?.present();
+              }}
+            />
+          ))
+        )}
+      </ScrollView>
 
       {/* Nuova lista */}
       <BottomSheetModal
@@ -429,6 +514,6 @@ export default function MyListsScreen() {
           />
         </BottomSheetView>
       </BottomSheetModal>
-    </ScrollView>
+    </View>
   );
 }

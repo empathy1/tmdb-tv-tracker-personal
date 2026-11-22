@@ -158,12 +158,6 @@ export default function HubScreen() {
 
       const file = result.result;
 
-      console.log("FILE SELEZIONATO:", {
-        name: file.name,
-        uri: file.uri,
-        type: file.type,
-      });
-
       Alert.alert(
         "Importa database",
         "Attenzione: tutti i dati attuali verranno sostituiti con quelli del backup. Vuoi continuare?",
@@ -362,8 +356,14 @@ export default function HubScreen() {
           getHubBackgroundOptions(),
         ]);
 
+        const hiddenLists = ["Archivio", "Droppate", "Watchlist", "Archiviati"];
+
+        const visibleLists = listsResult.filter(
+          (list) => !hiddenLists.includes(list.name),
+        );
+
         const listsWithItems = await Promise.all(
-          listsResult.map(async (list) => ({
+          visibleLists.map(async (list) => ({
             ...list,
             items: await getHubListItems(list.list_id),
           })),
@@ -526,10 +526,7 @@ export default function HubScreen() {
               }}
             >
               <Pressable
-                onPress={() => {
-                  console.log("IMPOSTAZIONI PREMUTE");
-                  openDatabaseSheet();
-                }}
+                onPress={openDatabaseSheet}
                 style={{
                   width: 40,
                   height: 40,
@@ -712,9 +709,12 @@ export default function HubScreen() {
         <View style={{ marginHorizontal: 20 }}>
           <ListsCarousel
             lists={lists}
-            onListPress={(list) => {
-              console.log("Lista selezionata:", list.list_id);
-            }}
+            onListPress={(list) =>
+              router.push({
+                pathname: "/lists/[id]",
+                params: { id: list.list_id },
+              })
+            }
             onTitlePress={() => router.push("/lists")}
           />
         </View>
@@ -736,7 +736,14 @@ export default function HubScreen() {
         <View style={{ marginHorizontal: 20 }}>
           <HorizontalMediaList<HubFavoriteSeries>
             title="Serie preferite"
-            data={favoriteSeries}
+            data={favoriteSeries.slice(0, 10)}
+            showMore
+            onMorePress={() =>
+              router.push({
+                pathname: "/lists/[id]",
+                params: { id: "favorites", type: "series" },
+              })
+            }
             keyExtractor={(item) => String(item.tmdb_id)}
             renderItem={({ item }) => (
               <MediaCard
@@ -763,7 +770,14 @@ export default function HubScreen() {
         <View style={{ marginHorizontal: 20 }}>
           <HorizontalMediaList<HubFavoriteMovie>
             title="Film preferiti"
-            data={favoriteMovies}
+            data={favoriteMovies.slice(0, 10)}
+            showMore
+            onMorePress={() =>
+              router.push({
+                pathname: "/lists/[id]",
+                params: { id: "favorites", type: "movie" },
+              })
+            }
             keyExtractor={(item) => String(item.tmdb_id)}
             renderItem={({ item }) => (
               <MediaCard
@@ -938,8 +952,6 @@ export default function HubScreen() {
         ref={backgroundSheetRef}
         snapPoints={backgroundSnapPoints}
         enablePanDownToClose
-        onChange={(index) => console.log("SHEET INDEX:", index)}
-        onDismiss={() => console.log("SHEET DISMISSED")}
         backgroundStyle={{ backgroundColor: colors.surface }}
         handleIndicatorStyle={{ backgroundColor: colors.textSecondary }}
         backdropComponent={(props) => (

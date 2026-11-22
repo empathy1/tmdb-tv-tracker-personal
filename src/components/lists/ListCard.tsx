@@ -12,12 +12,18 @@ type ListCardProps = {
   list: HubList & { items: HubListItem[] };
   onPress: () => void;
   onMenuPress?: () => void;
+  selectionMode?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: () => void;
 };
 
 export default function ListCard({
   list,
   onPress,
   onMenuPress,
+  selectionMode = false,
+  isSelected = false,
+  onToggleSelect,
 }: ListCardProps) {
   const { width } = useWindowDimensions();
 
@@ -37,11 +43,11 @@ export default function ListCard({
         overflow: "hidden",
       }}
     >
-      {onMenuPress && (
+      {selectionMode ? (
         <Pressable
           onPress={(event) => {
             event.stopPropagation();
-            onMenuPress();
+            onToggleSelect?.();
           }}
           hitSlop={8}
           style={{
@@ -57,8 +63,36 @@ export default function ListCard({
             alignItems: "center",
           }}
         >
-          <Ionicons name="ellipsis-vertical" size={20} color="#FFFFFF" />
+          <Ionicons
+            name={isSelected ? "checkbox" : "square-outline"}
+            size={24}
+            color={colors.continuing}
+          />
         </Pressable>
+      ) : (
+        onMenuPress && (
+          <Pressable
+            onPress={(event) => {
+              event.stopPropagation();
+              onMenuPress();
+            }}
+            hitSlop={8}
+            style={{
+              position: "absolute",
+              top: 8,
+              right: 8,
+              zIndex: 2,
+              width: 34,
+              height: 34,
+              borderRadius: 17,
+              backgroundColor: "rgba(0,0,0,0.7)",
+              justifyContent: "center",
+              alignItems: "center",
+            }}
+          >
+            <Ionicons name="ellipsis-vertical" size={18} color="#FFFFFF" />
+          </Pressable>
+        )
       )}
       <View
         style={{

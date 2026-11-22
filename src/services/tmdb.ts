@@ -254,6 +254,42 @@ export async function getPopularMovies(
   };
 }
 
+export async function getTrendingTv(
+  titleLanguage: TitleLanguage = "it",
+): Promise<TMDBTvSearchResponse> {
+  const language = getTMDBLanguage(titleLanguage) ?? "en-US";
+  const data = await tmdbFetch<TMDBTvSearchResponse>("/trending/tv/day", {
+    language,
+    page: 1,
+  });
+
+  return {
+    ...data,
+    results: data.results.map((item) => ({
+      ...item,
+      name: getTvTitle(item, titleLanguage),
+    })),
+  };
+}
+
+export async function getTrendingMovies(
+  titleLanguage: TitleLanguage = "it",
+): Promise<TMDBMovieSearchResponse> {
+  const language = getTMDBLanguage(titleLanguage) ?? "en-US";
+  const data = await tmdbFetch<TMDBMovieSearchResponse>("/trending/movie/day", {
+    language,
+    page: 1,
+  });
+
+  return {
+    ...data,
+    results: data.results.map((item) => ({
+      ...item,
+      title: getMovieTitle(item, titleLanguage),
+    })),
+  };
+}
+
 export async function getTvDetails(
   id: number,
   titleLanguage: TitleLanguage = "it",

@@ -481,7 +481,14 @@ export default function MovieDetails() {
   }
 
   function handleAddToList() {
-    router.push("/lists");
+    router.push({
+      pathname: "/lists",
+      params: {
+        mode: "select",
+        itemType: "movie",
+        tmdbId: String(id),
+      },
+    });
   }
 
   function handleViewRewatches() {

@@ -1,11 +1,19 @@
 import * as SQLite from "expo-sqlite";
 
 import type {
+  TitleLanguage,
   TMDBMovieDetails,
   TMDBTvDetails,
   TMDBTvSeasonDetails,
 } from "@/types/tmdb";
 
+import {
+  getMovieDetails,
+  getMovieExternalIds,
+  getTvDetails,
+  getTvExternalIds,
+  getTvSeasonDetails,
+} from "@/services/tmdb";
 import { File } from "expo-file-system";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
@@ -25,6 +33,156 @@ export async function initializeDatabase(
   database: SQLite.SQLiteDatabase,
 ): Promise<void> {
   databaseInstance = database;
+}
+
+async function addToArchiveList(
+  itemType: "series" | "movie",
+  tmdbId: number,
+): Promise<void> {
+  const db = await getDatabase();
+
+  const archiveList = await db.getFirstAsync<{ list_id: string }>(
+    `SELECT list_id
+     FROM elenco_liste
+     WHERE name = 'Archivio' COLLATE NOCASE`,
+  );
+
+  if (!archiveList) {
+    throw new Error("La lista Archivio non è stata trovata.");
+  }
+
+  if (itemType === "series") {
+    await db.runAsync(
+      `INSERT INTO liste (list_id, item_type, series_tmdb_id)
+       SELECT ?, 'series', ?
+       WHERE NOT EXISTS (
+         SELECT 1 FROM liste
+         WHERE list_id = ? AND item_type = 'series' AND series_tmdb_id = ?
+       )`,
+      archiveList.list_id,
+      tmdbId,
+      archiveList.list_id,
+      tmdbId,
+    );
+  } else {
+    await db.runAsync(
+      `INSERT INTO liste (list_id, item_type, movie_tmdb_id)
+       SELECT ?, 'movie', ?
+       WHERE NOT EXISTS (
+         SELECT 1 FROM liste
+         WHERE list_id = ? AND item_type = 'movie' AND movie_tmdb_id = ?
+       )`,
+      archiveList.list_id,
+      tmdbId,
+      archiveList.list_id,
+      tmdbId,
+    );
+  }
+}
+
+async function syncWatchlistItem(
+  itemType: "series" | "movie",
+  tmdbId: number,
+  shouldBeInWatchlist: boolean,
+): Promise<void> {
+  const db = await getDatabase();
+
+  const watchlist = await db.getFirstAsync<{ list_id: string }>(
+    `SELECT list_id
+     FROM elenco_liste
+     WHERE name = 'Watchlist' COLLATE NOCASE`,
+  );
+
+  if (!watchlist) {
+    throw new Error("La lista Watchlist non è stata trovata.");
+  }
+
+  if (shouldBeInWatchlist) {
+    if (itemType === "series") {
+      await db.runAsync(
+        `INSERT INTO liste (list_id, item_type, series_tmdb_id)
+         SELECT ?, 'series', ?
+         WHERE NOT EXISTS (
+           SELECT 1 FROM liste
+           WHERE list_id = ?
+             AND item_type = 'series'
+             AND series_tmdb_id = ?
+         )`,
+        watchlist.list_id,
+        tmdbId,
+        watchlist.list_id,
+        tmdbId,
+      );
+    } else {
+      await db.runAsync(
+        `INSERT INTO liste (list_id, item_type, movie_tmdb_id)
+         SELECT ?, 'movie', ?
+         WHERE NOT EXISTS (
+           SELECT 1 FROM liste
+           WHERE list_id = ?
+             AND item_type = 'movie'
+             AND movie_tmdb_id = ?
+         )`,
+        watchlist.list_id,
+        tmdbId,
+        watchlist.list_id,
+        tmdbId,
+      );
+    }
+  } else {
+    await db.runAsync(
+      `DELETE FROM liste
+       WHERE list_id = ?
+         AND item_type = ?
+         AND ${itemType === "series" ? "series_tmdb_id" : "movie_tmdb_id"} = ?`,
+      watchlist.list_id,
+      itemType,
+      tmdbId,
+    );
+  }
+}
+
+async function syncDroppedListItem(
+  tmdbId: number,
+  shouldBeDropped: boolean,
+): Promise<void> {
+  const db = await getDatabase();
+
+  const droppedList = await db.getFirstAsync<{ list_id: string }>(
+    `SELECT list_id
+     FROM elenco_liste
+     WHERE name = 'Droppate' COLLATE NOCASE`,
+  );
+
+  if (!droppedList) {
+    throw new Error("La lista Droppate non è stata trovata.");
+  }
+
+  if (shouldBeDropped) {
+    await db.runAsync(
+      `INSERT INTO liste (list_id, item_type, series_tmdb_id)
+       SELECT ?, 'series', ?
+       WHERE NOT EXISTS (
+         SELECT 1 FROM liste
+         WHERE list_id = ?
+           AND item_type = 'series'
+           AND series_tmdb_id = ?
+       )`,
+      droppedList.list_id,
+      tmdbId,
+      droppedList.list_id,
+      tmdbId,
+    );
+  } else {
+    await db.runAsync(
+      `DELETE FROM liste
+       WHERE list_id = ?
+         AND item_type = 'series'
+         AND series_tmdb_id = ?`,
+      droppedList.list_id,
+      tmdbId,
+    );
+  }
 }
 
 export async function saveTvSeriesDetails(
@@ -62,6 +220,17 @@ export async function saveTvSeriesDetails(
     details.first_air_date || null,
     "not_started_yet",
   );
+
+  await addToArchiveList("series", details.id);
+  const savedSeries = await db.getFirstAsync<{
+    watch_status: string | null;
+  }>("SELECT watch_status FROM series WHERE tmdb_id = ?", details.id);
+
+  await syncWatchlistItem(
+    "series",
+    details.id,
+    savedSeries?.watch_status === "not_started_yet",
+  );
 }
 
 export async function saveMovieDetails(
@@ -86,7 +255,8 @@ export async function saveMovieDetails(
     )
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(tmdb_id) DO UPDATE SET
-      runtime = COALESCE(excluded.runtime, movies.runtime)`,
+      runtime = COALESCE(excluded.runtime, movies.runtime)
+    WHERE movies.source = 'legacy'`,
     details.id,
     externalIds.imdb_id,
     details.title,
@@ -96,6 +266,13 @@ export async function saveMovieDetails(
     details.release_date || null,
     details.runtime,
   );
+
+  await addToArchiveList("movie", details.id);
+  const savedMovie = await db.getFirstAsync<{
+    is_watched: number;
+  }>("SELECT is_watched FROM movies WHERE tmdb_id = ?", details.id);
+
+  await syncWatchlistItem("movie", details.id, savedMovie?.is_watched === 0);
 }
 
 export async function saveTvSeasonEpisodes(
@@ -122,7 +299,13 @@ export async function saveTvSeasonEpisodes(
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(series_tmdb_id, season_number, episode_number)
         DO UPDATE SET
-          runtime = COALESCE(excluded.runtime, episodes.runtime)`,
+          runtime = COALESCE(excluded.runtime, episodes.runtime)
+        WHERE EXISTS (
+          SELECT 1
+          FROM series
+          WHERE series.tmdb_id = episodes.series_tmdb_id
+            AND series.source = 'legacy'
+        )`,
         seriesTmdbId,
         episode.season_number,
         episode.episode_number,
@@ -350,6 +533,9 @@ export async function updateTvSeriesWatchStatus(
     watchStatus,
     tmdbId,
   );
+
+  await syncWatchlistItem("series", tmdbId, watchStatus === "not_started_yet");
+  await syncDroppedListItem(tmdbId, watchStatus === "stopped");
 }
 
 export type SavedEpisodeNumber = {
@@ -429,16 +615,19 @@ async function getHomeSeriesByWatchStatus(
            )
        )
      ORDER BY
-  CASE
-    WHEN s.watch_status = 'continuing' THEN (
-      SELECT MAX(watched_episode.watched_at)
-      FROM episodes watched_episode
-      WHERE watched_episode.series_tmdb_id = s.tmdb_id
-        AND watched_episode.is_special = 0
-        AND watched_episode.is_watched = 1
-    )
-  END DESC,
-  s.title COLLATE NOCASE`,
+      CASE
+        WHEN s.watch_status = 'continuing' THEN (
+          SELECT MAX(watched_episode.watched_at)
+          FROM episodes watched_episode
+          WHERE watched_episode.series_tmdb_id = s.tmdb_id
+            AND watched_episode.is_special = 0
+            AND watched_episode.is_watched = 1
+        )
+      END DESC,
+      CASE
+        WHEN s.watch_status = 'not_started_yet' THEN s.created_at
+      END DESC,
+      s.title COLLATE NOCASE`,
     watchStatus,
   );
 }
@@ -626,6 +815,9 @@ export async function markEpisodeWatched(
          )`,
       seriesTmdbId,
     );
+
+    await syncWatchlistItem("series", seriesTmdbId, false);
+    await syncDroppedListItem(seriesTmdbId, false);
   });
 }
 
@@ -694,6 +886,13 @@ export async function markEpisodeUnwatched(
         nextStatus,
         seriesTmdbId,
       );
+
+      await syncWatchlistItem(
+        "series",
+        seriesTmdbId,
+        nextStatus === "not_started_yet",
+      );
+      await syncDroppedListItem(seriesTmdbId, false);
     }
   });
 }
@@ -732,6 +931,9 @@ export async function markSeasonWatched(
          )`,
       seriesTmdbId,
     );
+
+    await syncWatchlistItem("series", seriesTmdbId, false);
+    await syncDroppedListItem(seriesTmdbId, false);
   });
 }
 
@@ -820,6 +1022,13 @@ export async function markSeasonUnwatched(
         nextStatus,
         seriesTmdbId,
       );
+
+      await syncWatchlistItem(
+        "series",
+        seriesTmdbId,
+        nextStatus === "not_started_yet",
+      );
+      await syncDroppedListItem(seriesTmdbId, false);
     }
   });
 }
@@ -1194,10 +1403,7 @@ export async function getNotWatchedMovies(): Promise<HomeMovie[]> {
        release_date
      FROM movies
      WHERE is_watched = 0
-     ORDER BY
-       CASE WHEN release_date IS NULL OR release_date = '' THEN 1 ELSE 0 END,
-       release_date,
-       title COLLATE NOCASE`,
+     ORDER BY created_at DESC`,
   );
 }
 
@@ -1235,6 +1441,8 @@ export async function markMovieWatched(
     watchedAt,
     movieTmdbId,
   );
+
+  await syncWatchlistItem("movie", movieTmdbId, false);
 }
 
 /**
@@ -1251,6 +1459,8 @@ export async function markMovieUnwatched(movieTmdbId: number): Promise<void> {
        WHERE tmdb_id = ?`,
       movieTmdbId,
     );
+
+    await syncWatchlistItem("movie", movieTmdbId, true);
 
     await db.runAsync(
       `DELETE FROM rewatch
@@ -1474,6 +1684,9 @@ export async function markHomeEpisodeWatched(
         seriesTmdbId,
       );
     }
+
+    await syncWatchlistItem("series", seriesTmdbId, false);
+    await syncDroppedListItem(seriesTmdbId, false);
   });
 }
 
@@ -2236,9 +2449,108 @@ export async function getHubListItems(listId: string): Promise<HubListItem[]> {
        ON l.item_type = 'movie'
        AND m.tmdb_id = l.movie_tmdb_id
      WHERE l.list_id = ?
-     ORDER BY l.custom_order ASC, l.added_at DESC`,
+     ORDER BY l.added_at ASC`,
     listId,
   );
+}
+
+export async function addHubListItem(
+  listId: string,
+  itemType: "series" | "movie",
+  tmdbId: number,
+  titleLanguage: TitleLanguage = "it",
+): Promise<void> {
+  const db = await getDatabase();
+
+  if (itemType === "series") {
+    const existingSeries = await db.getFirstAsync<{ found: number }>(
+      "SELECT 1 AS found FROM series WHERE tmdb_id = ?",
+      tmdbId,
+    );
+
+    if (!existingSeries) {
+      const [details, externalIds] = await Promise.all([
+        getTvDetails(tmdbId, titleLanguage),
+        getTvExternalIds(tmdbId),
+      ]);
+
+      await saveTvSeriesDetails(details, {
+        tvdb_id: externalIds.tvdb_id,
+        imdb_id: externalIds.imdb_id,
+      });
+
+      for (const season of details.seasons) {
+        const seasonDetails = await getTvSeasonDetails(
+          tmdbId,
+          season.season_number,
+          titleLanguage,
+        );
+
+        await saveTvSeasonEpisodes(tmdbId, seasonDetails);
+      }
+    }
+  } else {
+    const [details, externalIds] = await Promise.all([
+      getMovieDetails(tmdbId, titleLanguage),
+      getMovieExternalIds(tmdbId),
+    ]);
+
+    await saveMovieDetails(details, {
+      imdb_id: externalIds.imdb_id,
+    });
+  }
+
+  if (itemType === "series") {
+    await db.runAsync(
+      `INSERT INTO liste (list_id, item_type, series_tmdb_id)
+       SELECT ?, 'series', ?
+       WHERE NOT EXISTS (
+         SELECT 1 FROM liste
+         WHERE list_id = ? AND item_type = 'series' AND series_tmdb_id = ?
+       )`,
+      listId,
+      tmdbId,
+      listId,
+      tmdbId,
+    );
+  } else {
+    await db.runAsync(
+      `INSERT INTO liste (list_id, item_type, movie_tmdb_id)
+       SELECT ?, 'movie', ?
+       WHERE NOT EXISTS (
+         SELECT 1 FROM liste
+         WHERE list_id = ? AND item_type = 'movie' AND movie_tmdb_id = ?
+       )`,
+      listId,
+      tmdbId,
+      listId,
+      tmdbId,
+    );
+  }
+}
+
+export async function removeHubListItem(
+  listId: string,
+  itemType: "series" | "movie",
+  tmdbId: number,
+): Promise<void> {
+  const db = await getDatabase();
+
+  if (itemType === "series") {
+    await db.runAsync(
+      `DELETE FROM liste
+       WHERE list_id = ? AND item_type = 'series' AND series_tmdb_id = ?`,
+      listId,
+      tmdbId,
+    );
+  } else {
+    await db.runAsync(
+      `DELETE FROM liste
+       WHERE list_id = ? AND item_type = 'movie' AND movie_tmdb_id = ?`,
+      listId,
+      tmdbId,
+    );
+  }
 }
 
 export async function createHubList(name: string): Promise<void> {

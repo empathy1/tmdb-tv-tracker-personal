@@ -27,15 +27,16 @@ export default function ListsCarousel({
         onPress={onTitlePress}
         style={{
           flexDirection: "row",
-          alignItems: "flex-start",
-          alignSelf: "flex-start",
+          alignItems: "center",
+          justifyContent: "space-between",
+          width: "100%",
         }}
       >
         <Text style={globalStyles.sectionTitle}>Le mie liste</Text>
         <Ionicons
           name="chevron-forward"
           size={18}
-          color={colors.textSecondary}
+          color={colors.text}
           style={{
             marginLeft: 5,
             marginTop: 2,

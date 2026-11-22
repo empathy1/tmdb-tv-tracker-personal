@@ -769,11 +769,13 @@ export default function HomeScreen() {
         true,
       )}
 
-      {renderSection(
-        "Da guardare più tardi",
-        data.watchLater,
-        "watch_later",
-        true,
+      {data.movies.length > 0 && (
+        <HorizontalMediaList<HomeMovie>
+          title="Film da guardare"
+          data={data.movies}
+          keyExtractor={(item) => String(item.tmdb_id)}
+          renderItem={({ item }) => renderMovieItem(item)}
+        />
       )}
 
       {data.calendar.length > 0 && (
@@ -785,13 +787,11 @@ export default function HomeScreen() {
         />
       )}
 
-      {data.movies.length > 0 && (
-        <HorizontalMediaList<HomeMovie>
-          title="Film da guardare"
-          data={data.movies}
-          keyExtractor={(item) => String(item.tmdb_id)}
-          renderItem={({ item }) => renderMovieItem(item)}
-        />
+      {renderSection(
+        "Da guardare più tardi",
+        data.watchLater,
+        "watch_later",
+        true,
       )}
 
       {data.continuing.length === 0 &&
