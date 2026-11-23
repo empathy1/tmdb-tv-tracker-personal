@@ -254,6 +254,44 @@ export async function getPopularMovies(
   };
 }
 
+export async function getUpcomingMovies(
+  titleLanguage: TitleLanguage = "it",
+): Promise<TMDBMovieSearchResponse> {
+  const language = getTMDBLanguage(titleLanguage) ?? "en-US";
+
+  const data = await tmdbFetch<TMDBMovieSearchResponse>("/movie/upcoming", {
+    language,
+    page: 1,
+  });
+
+  return {
+    ...data,
+    results: data.results.map((item) => ({
+      ...item,
+      title: getMovieTitle(item, titleLanguage),
+    })),
+  };
+}
+
+export async function getUpcomingTv(
+  titleLanguage: TitleLanguage = "it",
+): Promise<TMDBTvSearchResponse> {
+  const language = getTMDBLanguage(titleLanguage) ?? "en-US";
+
+  const data = await tmdbFetch<TMDBTvSearchResponse>("/tv/on_the_air", {
+    language,
+    page: 1,
+  });
+
+  return {
+    ...data,
+    results: data.results.map((item) => ({
+      ...item,
+      name: getTvTitle(item, titleLanguage),
+    })),
+  };
+}
+
 export async function getTrendingTv(
   titleLanguage: TitleLanguage = "it",
 ): Promise<TMDBTvSearchResponse> {

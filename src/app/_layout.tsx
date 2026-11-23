@@ -24,6 +24,11 @@ export default function RootLayout() {
           <BottomSheetModalProvider>
             <Stack screenOptions={{ headerShown: false }}>
               <Stack.Screen name="(tabs)" />
+
+              <Stack.Screen
+                name="discover/[section]"
+                options={{ headerShown: false }}
+              />
             </Stack>
           </BottomSheetModalProvider>
         </LanguageProvider>

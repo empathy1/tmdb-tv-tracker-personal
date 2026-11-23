@@ -1580,4 +1580,71 @@ Abbiamo analizzato il comportamento dello scorrimento orizzontale di ListsCarous
 - Provate alcune modifiche alle dimensioni e alla spaziatura delle pagine.
 Il problema dello spazio visivo tra le card non è stato risolto. Abbiamo quindi deciso di mantenere il componente nella sua versione originale, senza restringere le card o introdurre modifiche che non ti convincono.
 
+## Riepilogo lavoro – 23 novembre 2026
+Oggi abbiamo proseguito lo sviluppo della sezione Scopri dell'app TV Tracker, completando la struttura delle sezioni principali e la gestione dei contenuti attesi.
+1. Sezione Scopri
+Abbiamo completato le tre sezioni principali:
+- Di tendenza: mostra film e serie TV di tendenza tramite TMDB.
+- Popolari: mostra film e serie TV popolari tramite TMDB.
+- Attesi: mostra i film in uscita e le serie attualmente in onda.
+Le prime due sezioni hanno anche un'intestazione cliccabile che permette di accedere alla rispettiva pagina con tutti i contenuti.
+2. Gestione dei contenuti Attesi
+Abbiamo implementato il segnalibro per aggiungere i contenuti alla Watchlist.
+
+Il comportamento previsto è:
+Situazione	Segnalibro
+Contenuto non presente nel database	Vuoto, cliccabile
+Contenuto già nella Watchlist	Pieno, non modificabile
+Contenuto nel database ma non nella Watchlist	Non visibile
+
+Quando si aggiunge una serie:
+- Vengono recuperati i dettagli da TMDB.
+- Viene salvata la serie nel database.
+- Vengono recuperati e salvati i dettagli delle stagioni e degli episodi.
+- La serie viene aggiunta automaticamente alla Watchlist.
+Per i film viene salvato il dettaglio e il contenuto viene aggiunto alla Watchlist.
+
+Abbiamo inoltre individuato che alcuni stati presenti nel database dopo la migrazione non sono corretti. Non abbiamo modificato questa logica: la sistemeremo in futuro.
+3. Ordinamento della sezione Attesi
+Abbiamo aggiunto il campo releaseDate al tipo DiscoverItem.
+
+Il campo viene valorizzato per:
+- Serie TV tramite first_air_date.
+- Film tramite release_date.
+Abbiamo uniformato il campo anche nei mapping di Di tendenza e Popolari.
+
+La sezione Attesi ora ordina i contenuti per data di uscita decrescente, mostrando prima quelli con la data più recente. I contenuti senza data vengono posizionati in fondo.
+
+Abbiamo valutato anche l'ordinamento per popolarità o trending, ma abbiamo deciso di mantenere per ora soltanto quello cronologico.
+
+Programma per la prossima sessione
+1. Filtri globali della pagina Scopri
+Aggiungeremo i filtri per tipologia, validi per tutte le sezioni contemporaneamente:
+- Tutti
+- Film
+- Serie TV
+Selezionando una tipologia, tutte le sezioni mostreranno esclusivamente i contenuti corrispondenti.
+2. Filtri interni alle singole sezioni
+Aggiungeremo anche filtri indipendenti all'interno di ciascuna sezione:
+- Di tendenza: Film / Serie TV.
+- Popolari: Film / Serie TV.
+- Attesi: Film / Serie TV.
+I filtri interni dovranno convivere con quello globale, senza sovrascriverlo.
+3. Nuova pagina Tutti gli Attesi
+Creeremo una pagina dedicata per visualizzare tutti i contenuti della sezione Attesi.
+
+Prevediamo di:
+- Collegare la pagina all'intestazione della sezione Attesi.
+- Visualizzare tutti i risultati disponibili.
+- Mantenere la distinzione tra film e serie.
+- Integrare i filtri per tipologia.
+- Conservare la gestione dei segnalibri e della Watchlist.
+4. Sistemazione generale della pagina Scopri
+Una volta implementate le funzionalità, faremo una revisione complessiva di:
+- Layout e spaziature.
+- Coerenza grafica tra le sezioni.
+- Posizionamento e comportamento dei filtri.
+- Navigazione tra Scopri e le pagine dedicate.
+- Gestione dei caricamenti e degli eventuali stati vuoti.
+Obiettivo della prossima sessione: completare l'esperienza di navigazione e filtraggio della sezione Scopri, rendendola coerente e pronta per essere utilizzata.
 

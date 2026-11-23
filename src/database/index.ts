@@ -53,8 +53,14 @@ async function addToArchiveList(
 
   if (itemType === "series") {
     await db.runAsync(
-      `INSERT INTO liste (list_id, item_type, series_tmdb_id)
-       SELECT ?, 'series', ?
+      `INSERT INTO liste (
+         list_id, item_type, series_tmdb_id, custom_order
+       )
+       SELECT ?, 'series', ?,
+         COALESCE(
+           (SELECT MAX(custom_order) + 1 FROM liste WHERE list_id = ?),
+           0
+         )
        WHERE NOT EXISTS (
          SELECT 1 FROM liste
          WHERE list_id = ? AND item_type = 'series' AND series_tmdb_id = ?
@@ -62,18 +68,26 @@ async function addToArchiveList(
       archiveList.list_id,
       tmdbId,
       archiveList.list_id,
+      archiveList.list_id,
       tmdbId,
     );
   } else {
     await db.runAsync(
-      `INSERT INTO liste (list_id, item_type, movie_tmdb_id)
-       SELECT ?, 'movie', ?
+      `INSERT INTO liste (
+         list_id, item_type, movie_tmdb_id, custom_order
+       )
+       SELECT ?, 'movie', ?,
+         COALESCE(
+           (SELECT MAX(custom_order) + 1 FROM liste WHERE list_id = ?),
+           0
+         )
        WHERE NOT EXISTS (
          SELECT 1 FROM liste
          WHERE list_id = ? AND item_type = 'movie' AND movie_tmdb_id = ?
        )`,
       archiveList.list_id,
       tmdbId,
+      archiveList.list_id,
       archiveList.list_id,
       tmdbId,
     );
@@ -100,31 +114,41 @@ async function syncWatchlistItem(
   if (shouldBeInWatchlist) {
     if (itemType === "series") {
       await db.runAsync(
-        `INSERT INTO liste (list_id, item_type, series_tmdb_id)
-         SELECT ?, 'series', ?
-         WHERE NOT EXISTS (
-           SELECT 1 FROM liste
-           WHERE list_id = ?
-             AND item_type = 'series'
-             AND series_tmdb_id = ?
-         )`,
+        `INSERT INTO liste (
+     list_id, item_type, series_tmdb_id, custom_order
+   )
+   SELECT ?, 'series', ?,
+     COALESCE(
+       (SELECT MAX(custom_order) + 1 FROM liste WHERE list_id = ?),
+       0
+     )
+   WHERE NOT EXISTS (
+     SELECT 1 FROM liste
+     WHERE list_id = ? AND item_type = 'series' AND series_tmdb_id = ?
+   )`,
         watchlist.list_id,
         tmdbId,
+        watchlist.list_id,
         watchlist.list_id,
         tmdbId,
       );
     } else {
       await db.runAsync(
-        `INSERT INTO liste (list_id, item_type, movie_tmdb_id)
-         SELECT ?, 'movie', ?
-         WHERE NOT EXISTS (
-           SELECT 1 FROM liste
-           WHERE list_id = ?
-             AND item_type = 'movie'
-             AND movie_tmdb_id = ?
-         )`,
+        `INSERT INTO liste (
+     list_id, item_type, movie_tmdb_id, custom_order
+   )
+   SELECT ?, 'movie', ?,
+     COALESCE(
+       (SELECT MAX(custom_order) + 1 FROM liste WHERE list_id = ?),
+       0
+     )
+   WHERE NOT EXISTS (
+     SELECT 1 FROM liste
+     WHERE list_id = ? AND item_type = 'movie' AND movie_tmdb_id = ?
+   )`,
         watchlist.list_id,
         tmdbId,
+        watchlist.list_id,
         watchlist.list_id,
         tmdbId,
       );
@@ -160,16 +184,21 @@ async function syncDroppedListItem(
 
   if (shouldBeDropped) {
     await db.runAsync(
-      `INSERT INTO liste (list_id, item_type, series_tmdb_id)
-       SELECT ?, 'series', ?
-       WHERE NOT EXISTS (
-         SELECT 1 FROM liste
-         WHERE list_id = ?
-           AND item_type = 'series'
-           AND series_tmdb_id = ?
-       )`,
+      `INSERT INTO liste (
+     list_id, item_type, series_tmdb_id, custom_order
+   )
+   SELECT ?, 'series', ?,
+     COALESCE(
+       (SELECT MAX(custom_order) + 1 FROM liste WHERE list_id = ?),
+       0
+     )
+   WHERE NOT EXISTS (
+     SELECT 1 FROM liste
+     WHERE list_id = ? AND item_type = 'series' AND series_tmdb_id = ?
+   )`,
       droppedList.list_id,
       tmdbId,
+      droppedList.list_id,
       droppedList.list_id,
       tmdbId,
     );
@@ -319,6 +348,45 @@ export async function saveTvSeasonEpisodes(
       );
     }
   });
+}
+
+export async function getSavedMediaIds(): Promise<{
+  series: number[];
+  movies: number[];
+  watchlistSeries: number[];
+  watchlistMovies: number[];
+}> {
+  const db = await getDatabase();
+
+  const [series, movies] = await Promise.all([
+    db.getAllAsync<{
+      tmdb_id: number;
+      watch_status: string | null;
+    }>(
+      `SELECT tmdb_id, watch_status
+       FROM series`,
+    ),
+    db.getAllAsync<{
+      tmdb_id: number;
+      is_watched: number;
+    }>(
+      `SELECT tmdb_id, is_watched
+       FROM movies`,
+    ),
+  ]);
+
+  return {
+    series: series.map((item) => item.tmdb_id),
+    movies: movies.map((item) => item.tmdb_id),
+
+    watchlistSeries: series
+      .filter((item) => item.watch_status === "not_started_yet")
+      .map((item) => item.tmdb_id),
+
+    watchlistMovies: movies
+      .filter((item) => item.is_watched === 0)
+      .map((item) => item.tmdb_id),
+  };
 }
 
 export async function exportDatabaseFile(
@@ -2449,9 +2517,47 @@ export async function getHubListItems(listId: string): Promise<HubListItem[]> {
        ON l.item_type = 'movie'
        AND m.tmdb_id = l.movie_tmdb_id
      WHERE l.list_id = ?
-     ORDER BY l.added_at ASC`,
+     ORDER BY l.custom_order ASC, l.added_at ASC`,
     listId,
   );
+}
+
+export async function getWatchlistItemIds(): Promise<{
+  series: number[];
+  movies: number[];
+}> {
+  const db = await getDatabase();
+
+  const watchlist = await db.getFirstAsync<{ list_id: string }>(
+    `SELECT list_id
+     FROM elenco_liste
+     WHERE name = 'Watchlist' COLLATE NOCASE`,
+  );
+
+  if (!watchlist) {
+    return { series: [], movies: [] };
+  }
+
+  const items = await db.getAllAsync<{
+    item_type: "series" | "movie";
+    tmdb_id: number;
+  }>(
+    `SELECT
+       item_type,
+       COALESCE(series_tmdb_id, movie_tmdb_id) AS tmdb_id
+     FROM liste
+     WHERE list_id = ?`,
+    watchlist.list_id,
+  );
+
+  return {
+    series: items
+      .filter((item) => item.item_type === "series")
+      .map((item) => item.tmdb_id),
+    movies: items
+      .filter((item) => item.item_type === "movie")
+      .map((item) => item.tmdb_id),
+  };
 }
 
 export async function addHubListItem(
@@ -2502,27 +2608,41 @@ export async function addHubListItem(
 
   if (itemType === "series") {
     await db.runAsync(
-      `INSERT INTO liste (list_id, item_type, series_tmdb_id)
-       SELECT ?, 'series', ?
-       WHERE NOT EXISTS (
-         SELECT 1 FROM liste
-         WHERE list_id = ? AND item_type = 'series' AND series_tmdb_id = ?
-       )`,
+      `INSERT INTO liste (
+     list_id, item_type, series_tmdb_id, custom_order
+   )
+   SELECT ?, 'series', ?,
+     COALESCE(
+       (SELECT MAX(custom_order) + 1 FROM liste WHERE list_id = ?),
+       0
+     )
+   WHERE NOT EXISTS (
+     SELECT 1 FROM liste
+     WHERE list_id = ? AND item_type = 'series' AND series_tmdb_id = ?
+   )`,
       listId,
       tmdbId,
+      listId,
       listId,
       tmdbId,
     );
   } else {
     await db.runAsync(
-      `INSERT INTO liste (list_id, item_type, movie_tmdb_id)
-       SELECT ?, 'movie', ?
-       WHERE NOT EXISTS (
-         SELECT 1 FROM liste
-         WHERE list_id = ? AND item_type = 'movie' AND movie_tmdb_id = ?
-       )`,
+      `INSERT INTO liste (
+     list_id, item_type, movie_tmdb_id, custom_order
+   )
+   SELECT ?, 'movie', ?,
+     COALESCE(
+       (SELECT MAX(custom_order) + 1 FROM liste WHERE list_id = ?),
+       0
+     )
+   WHERE NOT EXISTS (
+     SELECT 1 FROM liste
+     WHERE list_id = ? AND item_type = 'movie' AND movie_tmdb_id = ?
+   )`,
       listId,
       tmdbId,
+      listId,
       listId,
       tmdbId,
     );
