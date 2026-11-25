@@ -22,6 +22,7 @@ type Props<T> = {
   onMorePress?: () => void;
   snapInterval?: number;
   showPager?: boolean;
+  marginTop?: number;
 };
 
 export default function HorizontalMediaList<T>({
@@ -34,11 +35,12 @@ export default function HorizontalMediaList<T>({
   onMorePress,
   snapInterval,
   showPager = false,
+  marginTop = 10,
 }: Props<T>) {
   const [currentPage, setCurrentPage] = useState(0);
 
   return (
-    <View style={{ marginTop: 30 }}>
+    <View style={{ marginTop }}>
       {showMore && data.length > 0 ? (
         <Pressable
           onPress={onMorePress}

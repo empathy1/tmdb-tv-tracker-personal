@@ -33,6 +33,36 @@ if (!TMDB_ACCESS_TOKEN) {
   throw new Error("TMDB Access Token non configurato.");
 }
 
+type TMDBRequestStats = {
+  total: number;
+  tvDetails: number;
+  tvSeasons: number;
+  movieDetails: number;
+  other: number;
+};
+
+let tmdbRequestStats: TMDBRequestStats = {
+  total: 0,
+  tvDetails: 0,
+  tvSeasons: 0,
+  movieDetails: 0,
+  other: 0,
+};
+
+export function resetTMDBRequestStats(): void {
+  tmdbRequestStats = {
+    total: 0,
+    tvDetails: 0,
+    tvSeasons: 0,
+    movieDetails: 0,
+    other: 0,
+  };
+}
+
+export function getTMDBRequestStats(): TMDBRequestStats {
+  return { ...tmdbRequestStats };
+}
+
 async function tmdbFetch<T>(
   endpoint: string,
   params?: Record<string, string | number | boolean>,
@@ -43,6 +73,18 @@ async function tmdbFetch<T>(
     Object.entries(params).forEach(([key, value]) => {
       url.searchParams.set(key, String(value));
     });
+  }
+
+  tmdbRequestStats.total++;
+
+  if (/^\/tv\/\d+\/season\/\d+$/.test(endpoint)) {
+    tmdbRequestStats.tvSeasons++;
+  } else if (/^\/tv\/\d+$/.test(endpoint)) {
+    tmdbRequestStats.tvDetails++;
+  } else if (/^\/movie\/\d+$/.test(endpoint)) {
+    tmdbRequestStats.movieDetails++;
+  } else {
+    tmdbRequestStats.other++;
   }
 
   const response = await fetch(url.toString(), {

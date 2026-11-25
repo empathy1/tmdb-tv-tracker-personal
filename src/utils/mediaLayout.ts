@@ -16,9 +16,9 @@ export function getMediaCardLayout(
 ): MediaCardLayout {
   const SIDE_MARGIN = 20;
   const MIN_GAP = 15;
-  const POSTER_WIDTH = 110;
+  const POSTER_WIDTH = 108;
   const MOBILE_BREAKPOINT = 430;
-  const MOBILE_POSTER_WIDTH = 96;
+  const MOBILE_POSTER_WIDTH = 86;
 
   if (list) {
     const containerWidth = screenWidth - SIDE_MARGIN * 2;
@@ -49,9 +49,7 @@ export function getMediaCardLayout(
   }
 
   const posterWidth =
-    screenWidth < MOBILE_BREAKPOINT
-      ? MOBILE_POSTER_WIDTH
-      : POSTER_WIDTH;
+    screenWidth < MOBILE_BREAKPOINT ? MOBILE_POSTER_WIDTH : POSTER_WIDTH;
 
   const availableWidth = screenWidth - SIDE_MARGIN * 2;
   const columns = Math.max(
@@ -60,9 +58,7 @@ export function getMediaCardLayout(
   );
 
   const gap =
-    columns > 1
-      ? (availableWidth - posterWidth * columns) / (columns - 1)
-      : 0;
+    columns > 1 ? (availableWidth - posterWidth * columns) / (columns - 1) : 0;
 
   return {
     columns,

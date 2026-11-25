@@ -10,6 +10,7 @@ import {
   RefreshControl,
   ScrollView,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
 
@@ -23,27 +24,52 @@ import {
   markMovieWatched,
 } from "@/database";
 
-import { getCalendarCache, setCalendarCache } from "@/services/calendarCache";
+import {
+  clearDirtyCalendarMedia,
+  getCalendarCache,
+  getDirtyCalendarMedia,
+  setCalendarCache,
+  updateCalendarCache,
+} from "@/services/calendarCache";
 
-import type { HomeMovie, HomeSeries, HomeWatchStatus } from "@/database";
+import type {
+  CalendarSeries,
+  HomeMovie,
+  HomeSeries,
+  HomeWatchStatus,
+} from "@/database";
 
 import HorizontalMediaList from "@/components/HorizontalMediaList";
 import MediaCard from "@/components/MediaCard";
 
 import { spacing } from "@/constants/theme";
-import { getTvDetails, TMDB_IMAGE_BASE_URL } from "@/services/tmdb";
+import {
+  getMovieDetails,
+  getTMDBRequestStats,
+  getTvDetails,
+  getTvSeasonDetails,
+  resetTMDBRequestStats,
+  TMDB_IMAGE_BASE_URL,
+} from "@/services/tmdb";
 import { colors, globalStyles } from "@/styles/global";
+import { getMediaCardLayout } from "@/utils/mediaLayout";
+import { scheduleCalendarNotifications } from "@/utils/notifications";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type CalendarItem = {
+  id: string;
+  type: "movie" | "episode";
+  categories: ("movie" | "premiere" | "finale" | "episode")[];
   tmdb_id: number;
   title: string;
   poster_path: string | null;
-  episode_id: number;
-  episode_title: string;
-  season_number: number;
-  episode_number: number;
-  air_date: string;
+  release_date: string;
   days_until: number;
+
+  episode_id?: number;
+  episode_title?: string;
+  season_number?: number;
+  episode_number?: number;
 };
 
 type HomeListsData = {
@@ -178,9 +204,14 @@ function AnimatedHomeItem({ fading, children }: AnimatedHomeItemProps) {
 }
 
 export default function HomeScreen() {
+  const insets = useSafeAreaInsets();
+  const { width: screenWidth } = useWindowDimensions();
+  const { gap, containerPadding } = getMediaCardLayout(screenWidth, false);
+
   const router = useRouter();
 
   const [data, setData] = useState<HomeData>(initialData);
+  const [calendarLoading, setCalendarLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [savingEpisode, setSavingEpisode] = useState<string | null>(null);
@@ -190,6 +221,19 @@ export default function HomeScreen() {
   const [savingMovie, setSavingMovie] = useState<number | null>(null);
   const [successMovie, setSuccessMovie] = useState<number | null>(null);
   const [fadingMovie, setFadingMovie] = useState<number | null>(null);
+
+  const [calendarFilter, setCalendarFilter] = useState<
+    "all" | "premiere" | "finale"
+  >("all");
+
+  const calendarScrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
+
+  useEffect(() => {
+    calendarScrollRef.current?.scrollTo({
+      x: 0,
+      animated: false,
+    });
+  }, [calendarFilter]);
 
   const fetchHomeData = useCallback(async (): Promise<HomeData> => {
     const [continuing, notStarted, watchLater, movies] = await Promise.all([
@@ -208,75 +252,308 @@ export default function HomeScreen() {
     };
   }, []);
 
-  const fetchCalendarData = useCallback(async (): Promise<CalendarItem[]> => {
-    const cached = getCalendarCache<CalendarItem>();
+  const fetchCalendarData = useCallback(
+    async (forceRefresh = false): Promise<CalendarItem[]> => {
+      const cached = getCalendarCache<CalendarItem>();
 
-    if (cached && Date.now() - cached.timestamp < CALENDAR_CACHE_DURATION) {
-      return cached.items;
-    }
+      const dirtyMedia = getDirtyCalendarMedia();
 
-    const seriesList = await getCalendarSeries();
-    const calendarItems: CalendarItem[] = [];
+      const cacheIsValid =
+        cached &&
+        Date.now() - cached.timestamp < CALENDAR_CACHE_DURATION &&
+        cached.items.every(
+          (item) =>
+            Array.isArray(item.categories) &&
+            (item.type === "movie" || item.type === "episode"),
+        );
 
-    // Massimo 5 richieste TMDB contemporanee.
-    const batchSize = 5;
+      if (!forceRefresh && cacheIsValid && dirtyMedia.length === 0) {
+        void scheduleCalendarNotifications(cached.items).catch((error) => {
+          console.warn("Errore programmazione notifiche:", error);
+        });
 
-    for (let i = 0; i < seriesList.length; i += batchSize) {
-      const batch = seriesList.slice(i, i + batchSize);
+        return cached.items;
+      }
 
-      const results = await Promise.all(
-        batch.map(async (series) => {
-          try {
-            const details = await getTvDetails(series.tmdb_id);
-            const episode = details.next_episode_to_air;
+      resetTMDBRequestStats();
 
-            if (!episode?.air_date) {
-              return null;
-            }
+      const [seriesList, moviesList] = await Promise.all([
+        getCalendarSeries(),
+        getNotWatchedMovies(),
+      ]);
 
-            const daysUntil = getDaysUntil(episode.air_date);
+      console.log("Serie calendario:", seriesList.length);
+      console.log("Film calendario:", moviesList.length);
 
-            if (daysUntil === null || daysUntil <= 0) {
-              return null;
-            }
+      const calendarItems: CalendarItem[] = [];
+      const batchSize = 5;
 
-            return {
+      const updateCalendar = () => {
+        setData((prev) => ({
+          ...prev,
+          calendar: [...calendarItems].sort(
+            (a, b) =>
+              a.days_until - b.days_until || a.title.localeCompare(b.title),
+          ),
+        }));
+      };
+
+      const getMovieCalendarItems = async (
+        movie: HomeMovie,
+      ): Promise<CalendarItem[]> => {
+        const details = await getMovieDetails(movie.tmdb_id);
+
+        if (!details.release_date) {
+          return [];
+        }
+
+        const daysUntil = getDaysUntil(details.release_date);
+
+        if (daysUntil === null || daysUntil < 0) {
+          return [];
+        }
+
+        return [
+          {
+            id: `movie-${movie.tmdb_id}`,
+            type: "movie",
+            categories: ["movie"],
+            tmdb_id: movie.tmdb_id,
+            title: details.title || movie.title,
+            poster_path: details.poster_path || movie.poster_path,
+            release_date: details.release_date,
+            days_until: daysUntil,
+          },
+        ];
+      };
+
+      const getSeriesCalendarItems = async (
+        series: CalendarSeries,
+      ): Promise<CalendarItem[]> => {
+        const details = await getTvDetails(series.tmdb_id);
+
+        if (
+          !details.next_episode_to_air ||
+          details.next_episode_to_air.season_number <= 0
+        ) {
+          return [];
+        }
+
+        const seasonDetails = await getTvSeasonDetails(
+          series.tmdb_id,
+          details.next_episode_to_air.season_number,
+        );
+
+        const episodes = seasonDetails.episodes
+          .filter((episode) => episode.season_number > 0)
+          .sort((a, b) => a.episode_number - b.episode_number);
+
+        if (episodes.length === 0) {
+          return [];
+        }
+
+        const firstEpisode = episodes[0];
+        const lastEpisode = episodes[episodes.length - 1];
+
+        return episodes.flatMap((episode): CalendarItem[] => {
+          if (!episode.air_date) {
+            return [];
+          }
+
+          const daysUntil = getDaysUntil(episode.air_date);
+
+          if (daysUntil === null || daysUntil < 0) {
+            return [];
+          }
+
+          const categories: CalendarItem["categories"] = ["episode"];
+
+          if (episode.episode_number === firstEpisode.episode_number) {
+            categories.push("premiere");
+          } else if (episode.episode_number === lastEpisode.episode_number) {
+            categories.push("finale");
+          }
+
+          return [
+            {
+              id: `episode-${episode.id}`,
+              type: "episode",
+              categories,
               tmdb_id: series.tmdb_id,
               title: series.title,
               poster_path: series.poster_path,
+              release_date: episode.air_date,
+              days_until: daysUntil,
               episode_id: episode.id,
               episode_title: episode.name,
               season_number: episode.season_number,
               episode_number: episode.episode_number,
-              air_date: episode.air_date,
-              days_until: daysUntil,
-            };
+            },
+          ];
+        });
+      };
+
+      // Aggiorna soltanto i contenuti modificati se la cache è ancora valida.
+      if (!forceRefresh && cached && cacheIsValid && dirtyMedia.length > 0) {
+        const updatedItems = [...cached.items];
+        const processedMedia = [];
+
+        for (const dirty of dirtyMedia) {
+          try {
+            if (dirty.type === "movie") {
+              const movie = moviesList.find(
+                (item) => item.tmdb_id === dirty.tmdb_id,
+              );
+
+              const newItems = movie ? await getMovieCalendarItems(movie) : [];
+
+              const filteredItems = updatedItems.filter(
+                (item) =>
+                  !(item.type === "movie" && item.tmdb_id === dirty.tmdb_id),
+              );
+
+              updatedItems.length = 0;
+              updatedItems.push(...filteredItems, ...newItems);
+            } else {
+              const series = seriesList.find(
+                (item) => item.tmdb_id === dirty.tmdb_id,
+              );
+
+              const newItems = series
+                ? await getSeriesCalendarItems(series)
+                : [];
+
+              const filteredItems = updatedItems.filter(
+                (item) =>
+                  !(item.type === "episode" && item.tmdb_id === dirty.tmdb_id),
+              );
+
+              updatedItems.length = 0;
+              updatedItems.push(...filteredItems, ...newItems);
+            }
+
+            processedMedia.push(dirty);
           } catch (error) {
             console.warn(
-              `Errore recupero calendario serie ${series.tmdb_id}:`,
+              `Errore aggiornamento parziale calendario ${dirty.type} ${dirty.tmdb_id}:`,
               error,
             );
-
-            return null;
           }
-        }),
+        }
+
+        updatedItems.sort(
+          (a, b) =>
+            a.days_until - b.days_until || a.title.localeCompare(b.title),
+        );
+
+        updateCalendarCache(updatedItems);
+        clearDirtyCalendarMedia(processedMedia);
+
+        setData((prev) => ({
+          ...prev,
+          calendar: updatedItems,
+        }));
+
+        console.log(
+          "Richieste TMDB aggiornamento parziale:",
+          getTMDBRequestStats(),
+        );
+
+        void scheduleCalendarNotifications(updatedItems).catch((error) => {
+          console.warn("Errore programmazione notifiche:", error);
+        });
+
+        return updatedItems;
+      }
+
+      // Recupera le date aggiornate dei film già presenti nel DB.
+      for (let i = 0; i < moviesList.length; i += batchSize) {
+        const batch = moviesList.slice(i, i + batchSize);
+
+        const results = await Promise.all(
+          batch.map(async (movie) => {
+            try {
+              return await getMovieCalendarItems(movie);
+            } catch (error) {
+              console.warn(
+                `Errore recupero calendario film ${movie.tmdb_id}:`,
+                error,
+              );
+
+              return [];
+            }
+          }),
+        );
+
+        calendarItems.push(...results.flat());
+        updateCalendar();
+      }
+
+      // Recupera il prossimo episodio e la relativa stagione delle serie.
+      for (let i = 0; i < seriesList.length; i += batchSize) {
+        const batch = seriesList.slice(i, i + batchSize);
+
+        const results = await Promise.all(
+          batch.map(async (series) => {
+            try {
+              return await getSeriesCalendarItems(series);
+            } catch (error) {
+              console.warn(
+                `Errore recupero calendario serie ${series.tmdb_id}:`,
+                error,
+              );
+
+              return [];
+            }
+          }),
+        );
+
+        calendarItems.push(...results.flat());
+        updateCalendar();
+      }
+
+      console.log("Richieste TMDB calendario:", getTMDBRequestStats());
+
+      calendarItems.sort(
+        (a, b) => a.days_until - b.days_until || a.title.localeCompare(b.title),
       );
 
-      calendarItems.push(
-        ...results.filter((item): item is CalendarItem => item !== null),
+      const duplicates = calendarItems.filter(
+        (item, index, items) =>
+          items.findIndex((other) => other.id === item.id) !== index,
       );
-    }
 
-    calendarItems.sort((a, b) => a.days_until - b.days_until);
+      if (duplicates.length > 0) {
+        console.warn(
+          "Elementi calendario duplicati:",
+          duplicates.map((item) => ({
+            id: item.id,
+            title: item.title,
+            season: item.season_number,
+            episode: item.episode_number,
+            date: item.release_date,
+          })),
+        );
+      }
 
-    setCalendarCache(calendarItems);
+      setCalendarCache(calendarItems);
+      clearDirtyCalendarMedia(dirtyMedia);
+      void scheduleCalendarNotifications(calendarItems).catch((error) => {
+        console.warn("Errore programmazione notifiche:", error);
+      });
 
-    return calendarItems;
-  }, []);
+      return calendarItems;
+    },
+    [],
+  );
 
   const loadHomeData = useCallback(async () => {
     const result = await fetchHomeData();
-    setData((prev) => ({ ...prev, ...result }));
+    setData((prev) => ({
+      ...prev,
+      ...result,
+      calendar: prev.calendar,
+    }));
   }, [fetchHomeData]);
 
   useFocusEffect(
@@ -293,6 +570,8 @@ export default function HomeScreen() {
           }
 
           // Carica il Calendario separatamente.
+          setCalendarLoading(true);
+
           void fetchCalendarData()
             .then((calendar) => {
               if (active) {
@@ -301,6 +580,11 @@ export default function HomeScreen() {
             })
             .catch((error) => {
               console.error("Errore caricamento Calendario:", error);
+            })
+            .finally(() => {
+              if (active) {
+                setCalendarLoading(false);
+              }
             });
         } catch (error) {
           console.error("Errore caricamento Home:", error);
@@ -618,14 +902,37 @@ export default function HomeScreen() {
   };
 
   const getCalendarTimeLabel = (days: number): string => {
+    if (days === 0) {
+      return "Oggi";
+    }
+
     if (days === 1) {
-      return "Tra 1 giorno";
+      return "Domani";
     }
 
     return `Tra ${days} giorni`;
   };
 
+  const filteredCalendar = data.calendar.filter((item) => {
+    if (calendarFilter === "all") {
+      return true;
+    }
+
+    if (calendarFilter === "premiere") {
+      return item.type === "movie" || item.categories.includes("premiere");
+    }
+
+    return item.categories.includes("finale");
+  });
+
   const renderCalendarItem = (item: CalendarItem) => {
+    const isMovie = item.type === "movie";
+
+    const eventLabel =
+      item.type === "movie"
+        ? "Film in uscita"
+        : `S${String(item.season_number).padStart(2, "0")} · E${String(item.episode_number).padStart(2, "0")}`;
+
     return (
       <MediaCard
         title={item.title}
@@ -633,13 +940,48 @@ export default function HomeScreen() {
           item.poster_path ? `${TMDB_IMAGE_BASE_URL}${item.poster_path}` : null
         }
         horizontal
-        onPress={() => openSeries(item.tmdb_id)}
+        onPress={() =>
+          isMovie ? openMovie(item.tmdb_id) : openSeries(item.tmdb_id)
+        }
         info={
           <View style={{ marginTop: spacing.xs }}>
-            <Text style={globalStyles.caption}>
-              S{String(item.season_number).padStart(2, "0")} · E
-              {String(item.episode_number).padStart(2, "0")}
-            </Text>
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
+            >
+              <Text style={globalStyles.caption}>{eventLabel}</Text>
+              {item.type === "episode" &&
+                (item.categories.includes("premiere") ||
+                  item.categories.includes("finale")) && (
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      marginLeft: spacing.sm,
+                    }}
+                  >
+                    <View
+                      style={{
+                        width: 7,
+                        height: 7,
+                        borderRadius: 4,
+                        backgroundColor: item.categories.includes("premiere")
+                          ? colors.completed
+                          : colors.stopped,
+                        marginRight: spacing.xs,
+                      }}
+                    />
+                    <Text style={globalStyles.caption}>
+                      {item.categories.includes("premiere")
+                        ? "Première"
+                        : "Finale"}
+                    </Text>
+                  </View>
+                )}
+            </View>
 
             <Text
               style={[
@@ -677,10 +1019,7 @@ export default function HomeScreen() {
             <Text
               numberOfLines={1}
               adjustsFontSizeToFit
-              style={{
-                color: colors.textSecondary,
-                fontSize: 12,
-              }}
+              style={globalStyles.caption}
             >
               {formatMovieReleaseDate(movie.release_date)}
             </Text>
@@ -740,9 +1079,14 @@ export default function HomeScreen() {
 
   return (
     <ScrollView
-      style={globalStyles.container}
+      style={[
+        globalStyles.container,
+        {
+          paddingTop: insets.top + 10,
+          paddingHorizontal: containerPadding,
+        },
+      ]}
       contentContainerStyle={{
-        padding: spacing.lg,
         paddingBottom: spacing.xxl,
       }}
       showsVerticalScrollIndicator={false}
@@ -778,14 +1122,82 @@ export default function HomeScreen() {
         />
       )}
 
-      {data.calendar.length > 0 && (
-        <HorizontalMediaList<CalendarItem>
-          title="Calendario"
-          data={data.calendar}
-          keyExtractor={(item) => String(item.tmdb_id)}
-          renderItem={({ item }) => renderCalendarItem(item)}
-        />
-      )}
+      <View style={{ marginTop: spacing.xl }}>
+        <Text style={globalStyles.sectionTitle}>Calendario</Text>
+
+        <View
+          style={{
+            flexDirection: "row",
+            gap: spacing.sm,
+          }}
+        >
+          {[
+            { label: "Tutti", value: "all" },
+            { label: "Première", value: "premiere" },
+            { label: "Finale", value: "finale" },
+          ].map((filter) => {
+            const selected = calendarFilter === filter.value;
+
+            return (
+              <Pressable
+                key={filter.value}
+                onPress={() =>
+                  setCalendarFilter(
+                    filter.value as "all" | "premiere" | "finale",
+                  )
+                }
+                style={{
+                  paddingHorizontal: spacing.md,
+                  paddingVertical: spacing.sm,
+                  borderRadius: 20,
+                  backgroundColor: selected ? colors.primary : colors.surface,
+                }}
+              >
+                <Text
+                  style={{
+                    color: selected ? colors.background : colors.text,
+                    fontWeight: "600",
+                    fontSize: 13,
+                  }}
+                >
+                  {filter.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        {calendarLoading && filteredCalendar.length === 0 ? (
+          <View
+            style={{
+              paddingVertical: spacing.xl,
+              alignItems: "center",
+            }}
+          >
+            <ActivityIndicator size="small" color={colors.primary} />
+          </View>
+        ) : filteredCalendar.length > 0 ? (
+          <View style={{ marginTop: spacing.sm }}>
+            <ScrollView
+              ref={calendarScrollRef}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+            >
+              <View style={{ flexDirection: "row", gap: 20 }}>
+                {filteredCalendar.map((item, index) => (
+                  <View key={`${item.id}-${index}`}>
+                    {renderCalendarItem(item)}
+                  </View>
+                ))}
+              </View>
+            </ScrollView>
+          </View>
+        ) : (
+          <Text style={[globalStyles.empty, { marginTop: spacing.sm }]}>
+            Nessuna uscita disponibile per questo filtro.
+          </Text>
+        )}
+      </View>
 
       {renderSection(
         "Da guardare più tardi",

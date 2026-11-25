@@ -7,6 +7,7 @@ import type {
   TMDBTvSeasonDetails,
 } from "@/types/tmdb";
 
+import { markCalendarMediaDirty } from "@/services/calendarCache";
 import {
   getMovieDetails,
   getMovieExternalIds,
@@ -237,7 +238,11 @@ export async function saveTvSeriesDetails(
       watch_status
     )
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(tmdb_id) DO NOTHING`,
+    ON CONFLICT(tmdb_id) DO UPDATE SET
+  status = excluded.status,
+  overview = excluded.overview,
+  first_air_date = excluded.first_air_date
+  `,
     details.id,
     externalIds.tvdb_id,
     externalIds.imdb_id,
@@ -260,6 +265,8 @@ export async function saveTvSeriesDetails(
     details.id,
     savedSeries?.watch_status === "not_started_yet",
   );
+
+  markCalendarMediaDirty("series", details.id);
 }
 
 export async function saveMovieDetails(
@@ -302,6 +309,7 @@ export async function saveMovieDetails(
   }>("SELECT is_watched FROM movies WHERE tmdb_id = ?", details.id);
 
   await syncWatchlistItem("movie", details.id, savedMovie?.is_watched === 0);
+  markCalendarMediaDirty("movie", details.id);
 }
 
 export async function saveTvSeasonEpisodes(
@@ -348,6 +356,8 @@ export async function saveTvSeasonEpisodes(
       );
     }
   });
+
+  markCalendarMediaDirty("series", seriesTmdbId);
 }
 
 export async function getSavedMediaIds(): Promise<{
@@ -604,6 +614,7 @@ export async function updateTvSeriesWatchStatus(
 
   await syncWatchlistItem("series", tmdbId, watchStatus === "not_started_yet");
   await syncDroppedListItem(tmdbId, watchStatus === "stopped");
+  markCalendarMediaDirty("series", tmdbId);
 }
 
 export type SavedEpisodeNumber = {
@@ -727,7 +738,8 @@ export async function getCalendarSeries(): Promise<CalendarSeries[]> {
        title,
        poster_path
      FROM series
-     WHERE watch_status IN ('continuing', 'not_started_yet')
+     WHERE watch_status IN ('continuing', 'not_started_yet', 'up_to_date')
+        AND COALESCE(status, '') != 'Canceled'
      ORDER BY title COLLATE NOCASE`,
   );
 }

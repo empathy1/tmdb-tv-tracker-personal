@@ -9,6 +9,7 @@ import {
   ScrollView,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 
@@ -49,6 +50,7 @@ import {
   TMDB_IMAGE_BASE_URL,
   type TMDBBackdrop,
 } from "@/services/tmdb";
+import { getMediaCardLayout } from "@/utils/mediaLayout";
 import { Ionicons } from "@expo/vector-icons";
 import {
   BottomSheetBackdrop,
@@ -58,6 +60,7 @@ import {
   BottomSheetView,
 } from "@gorhom/bottom-sheet";
 import { LinearGradient } from "expo-linear-gradient";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 function formatWatchTime(totalMinutes: number): string {
   if (totalMinutes <= 0) return "0 min";
@@ -82,6 +85,9 @@ function formatNumber(value: number): string {
 }
 
 export default function HubScreen() {
+  const insets = useSafeAreaInsets();
+  const { width: screenWidth } = useWindowDimensions();
+  const { gap, containerPadding } = getMediaCardLayout(screenWidth, false);
   const [settings, setSettings] = useState<HubSettings | null>(null);
   const [statistics, setStatistics] = useState<HubStatistics | null>(null);
 

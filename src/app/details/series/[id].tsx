@@ -59,9 +59,8 @@ import {
   saveTvSeasonEpisodes,
   saveTvSeriesDetails,
   updateSeasonFirstWatchDate,
-  updateTvSeriesWatchStatus
+  updateTvSeriesWatchStatus,
 } from "@/database";
-import { invalidateCalendarCache } from "@/services/calendarCache";
 import {
   colors,
   getBottomActionContainerStyle,
@@ -534,8 +533,6 @@ export default function SeriesDetails() {
         );
 
         setAvailableEpisodes(releasedEpisodes);
-
-        invalidateCalendarCache();
 
         setIsSaved(true);
         setWatchStatus("not_started_yet");
@@ -1196,8 +1193,6 @@ export default function SeriesDetails() {
       );
       setAvailableEpisodes(releasedEpisodes);
 
-      invalidateCalendarCache();
-
       setIsSaved(true);
 
       const savedEpisodes = await getSavedEpisodeNumbers(seriesId);
@@ -1241,7 +1236,6 @@ export default function SeriesDetails() {
     );
 
     setAvailableEpisodes(releasedEpisodes);
-    invalidateCalendarCache();
 
     setIsSaved(true);
     setWatchStatus("not_started_yet");

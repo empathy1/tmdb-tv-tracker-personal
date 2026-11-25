@@ -42,7 +42,7 @@ export default function MediaCard({
     <View
       style={{
         width: list ? listPosterWidth : cardWidth,
-        height: list ? listPosterHeight : horizontal ? 230 : undefined,
+        height: list ? listPosterHeight : undefined,
         marginBottom: 10,
       }}
     >

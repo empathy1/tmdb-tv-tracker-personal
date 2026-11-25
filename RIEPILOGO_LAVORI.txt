@@ -1648,3 +1648,254 @@ Una volta implementate le funzionalità, faremo una revisione complessiva di:
 - Gestione dei caricamenti e degli eventuali stati vuoti.
 Obiettivo della prossima sessione: completare l'esperienza di navigazione e filtraggio della sezione Scopri, rendendola coerente e pronta per essere utilizzata.
 
+# Riepilogo lavori – Calendario Home
+**Data: 24 novembre 2026**
+
+## 1. Filtri del Calendario
+
+Abbiamo introdotto tre filtri:
+
+- **Tutti:** mostra tutti i film in uscita e gli episodi futuri.
+- **Première:** mostra i film in uscita e il primo episodio di ogni stagione.
+- **Finale:** mostra l'ultimo episodio di ogni stagione.
+
+La classificazione degli episodi avviene confrontando il numero dell'episodio con il primo e l'ultimo episodio della rispettiva stagione.
+
+## 2. Quali contenuti vengono mostrati
+
+Abbiamo definito queste regole:
+
+**Serie TV**
+- Vengono considerate soltanto le serie già presenti nel database.
+- Recuperiamo da TMDB i dettagli aggiornati delle serie, delle stagioni e degli episodi.
+- Non importa se gli episodi risultano già visti oppure no.
+- Vengono mostrati gli episodi con data di uscita odierna o futura.
+
+**Film**
+- Vengono considerati soltanto i film presenti nel database e non ancora visti.
+- Recuperiamo da TMDB la data di uscita aggiornata.
+- Vengono mostrati i film con data odierna o futura.
+
+**Date**
+- Abbiamo introdotto il riconoscimento degli eventi in uscita oggi, visualizzati con l'etichetta «Oggi».
+- Gli eventi successivi mostrano «Domani» oppure «Tra X giorni».
+
+## 3. Notifiche
+
+Abbiamo integrato `expo-notifications`.
+
+La programmazione riguarda:
+- Film in uscita.
+- Première delle stagioni.
+
+Non vengono programmate notifiche per tutti gli episodi o per i finali di stagione.
+
+L'orario previsto è le **09:00 del giorno di uscita**.
+
+Le notifiche precedenti del calendario vengono cancellate prima di programmare quelle aggiornate, evitando di accumulare notifiche obsolete.
+
+Abbiamo inoltre configurato i permessi e verificato il funzionamento con una notifica di prova.
+
+## 4. Problema degli episodi duplicati
+
+Durante i test abbiamo riscontrato:
+- Episodi visualizzati due volte.
+- Notifiche duplicate.
+- Warning React relativo a chiavi duplicate, ad esempio `episode-7587574`.
+
+Abbiamo individuato e rimosso una duplicazione della chiamata:
+
+```tsx
+calendarItems.push(...results.flat());
+```
+
+che era presente due volte.
+
+Abbiamo aggiunto temporaneamente un controllo per individuare eventuali ID duplicati nell'array `calendarItems`.
+
+Successivamente abbiamo modificato la chiave del rendering:
+
+```tsx
+key={`${item.id}-${index}`}
+```
+
+al posto di:
+
+```tsx
+key={item.id}
+```
+
+Il warning non compare più e abbiamo verificato che gli episodi nel calendario vengono visualizzati una sola volta.
+
+Non abbiamo però identificato con certezza l'origine del warning iniziale: la modifica della chiave evita la collisione nel rendering.
+
+## 5. Aggiornamento della Home
+
+Abbiamo modificato il comportamento della Home affinché il calendario venga aggiornato quando si torna sulla schermata.
+
+In particolare, abbiamo introdotto il caricamento separato del calendario tramite `useFocusEffect`.
+
+La funzione `fetchCalendarData` viene richiamata con:
+
+```tsx
+fetchCalendarData(true)
+```
+
+In questo modo viene forzato il recupero dei dati da TMDB, ignorando la cache.
+
+## 6. Caricamento progressivo del Calendario
+
+Questo è stato il lavoro principale della parte finale della sessione.
+
+Prima il calendario diventava visibile soltanto quando tutte le richieste a TMDB erano terminate.
+
+Abbiamo modificato il comportamento per mostrare i risultati progressivamente.
+
+Le modifiche effettuate:
+
+- Aggiunto lo stato `calendarLoading`.
+- Introdotta la funzione `updateCalendar` dentro `fetchCalendarData`.
+- Mantenuti i gruppi di richieste da 5 elementi.
+- Aggiornato il calendario dopo ogni gruppo di film.
+- Aggiornato il calendario dopo ogni gruppo di serie.
+- Aggiunto un indicatore `ActivityIndicator` durante il caricamento.
+- Resa la sezione Calendario sempre visibile, anche quando non ci sono ancora risultati.
+
+La funzione `updateCalendar` attualmente ordina i risultati dopo ogni aggiornamento:
+
+```tsx
+const updateCalendar = () => {
+  setData((prev) => ({
+    ...prev,
+    calendar: [...calendarItems].sort(
+      (a, b) =>
+        a.days_until - b.days_until ||
+        a.title.localeCompare(b.title),
+    ),
+  }));
+};
+```
+
+In questo modo gli elementi già caricati rimangono visibili e vengono riordinati cronologicamente quando arrivano nuovi risultati.
+
+Abbiamo verificato che:
+- La rotellina compare quando non ci sono ancora risultati.
+- Film ed episodi vengono visualizzati progressivamente.
+- I risultati non spariscono e non vengono sostituiti.
+- L'ordinamento cronologico viene aggiornato durante il caricamento.
+- Al termine, se non ci sono risultati per il filtro selezionato, viene mostrato il messaggio «Nessuna uscita disponibile per questo filtro».
+
+## 7. Stato attuale della cache
+
+La cache è gestita tramite:
+
+```tsx
+getCalendarCache<CalendarItem>()
+setCalendarCache(calendarItems)
+```
+
+La durata prevista è di 6 ore:
+
+```tsx
+const CALENDAR_CACHE_DURATION = 6 * 60 * 60 * 1000;
+```
+
+La funzione `fetchCalendarData` supporta già il parametro `forceRefresh`.
+
+Attualmente, però, la Home la richiama sempre con `true`, quindi la cache viene ignorata quando si torna sulla schermata.
+
+## 8. Prossimo lavoro: gestione intelligente della cache
+
+Abbiamo deciso di affrontare domani questo miglioramento.
+
+L'obiettivo è:
+
+1. Quando si apre la Home, utilizzare la cache se ancora valida.
+2. Ricaricare da TMDB soltanto quando la cache è scaduta oppure è stata invalidata.
+3. Invalidare la cache quando viene aggiunta una nuova serie o un nuovo film al database.
+4. Quando si torna sulla Home dopo una nuova aggiunta, recuperare i dati aggiornati da TMDB.
+5. Non invalidare la cache quando si modifica soltanto lo stato di visione di un episodio o di un film, perché questo non cambia le date degli eventi del calendario.
+
+Per procedere dovremo esaminare `calendarCache.ts` e individuare i punti in cui vengono salvate nuove serie e nuovi film.
+
+---
+
+**Punto di ripartenza per domani:** iniziare da `calendarCache.ts`, senza modificare ulteriormente il funzionamento del caricamento progressivo che adesso è stato verificato e funziona correttamente.
+
+# Riepilogo del lavoro – 25 novembre 2026
+Oggi abbiamo lavorato soprattutto su ottimizzazione del calendario, gestione della cache e comportamento delle schermate della tua app TV Tracker.
+## 1. Calendario: ottimizzazione delle richieste TMDB
+Abbiamo migliorato il recupero degli eventi del calendario nella Home.
+- Escluse le serie con stato Canceled da TMDB.
+- Escluse le serie con stato di visione stopped.
+- Mantenute le serie continuing, not_started_yet e up_to_date.
+- Ottimizzato il recupero degli episodi: invece di scaricare tutte le stagioni, recuperiamo soltanto quella del prossimo episodio in onda.
+- Mantenuti gli eventi futuri, con le categorie per episodi, première e finali.
+Risultato dei test: 406 serie controllate, 19 richieste per le stagioni e 425 richieste TMDB complessive, con un risparmio di circa l'81,2% rispetto al precedente sistema.
+## 2. Cache incrementale del calendario
+Abbiamo sostituito il sistema di invalidazione completa della cache con un aggiornamento mirato.
+
+In particolare:
+- Creato src/services/calendarCache.ts per gestire la cache e i contenuti da aggiornare.
+- Introdotta una lista di elementi da aggiornare (dirty), identificati per tipo e ID TMDB.
+- Aggiornate le funzioni del database:
+  - saveTvSeriesDetails
+  - saveMovieDetails
+  - saveTvSeasonEpisodes
+  - updateTvSeriesWatchStatus
+- Quando cambia una serie o un film, viene segnalato soltanto quell'elemento.
+- La cache generale continua ad avere una durata di 6 ore.
+- Quando si torna alla Home, se la cache è valida, vengono recuperati da TMDB soltanto gli elementi modificati.
+Test effettuati:
+- Modificando una serie, abbiamo verificato che venissero effettuate soltanto 2 richieste: dettagli della serie e stagione.
+- Tornando alla Home senza modifiche, non è stata effettuata nessuna richiesta TMDB.
+- Abbiamo corretto anche il problema delle serie impostate come stopped che continuavano a comparire nel calendario.
+## 3. Home: dimensione del testo delle date dei film
+In src/app/(tabs)/index.tsx abbiamo uniformato la dimensione del testo della data di uscita dei film nella sezione Film da guardare.
+
+Abbiamo sostituito lo stile personalizzato con:
+style={globalStyles.caption}
+
+
+In questo modo la data utilizza lo stesso stile tipografico delle altre informazioni secondarie della Home.
+
+# Riepilogo lavoro – 25 novembre 2026
+
+Oggi abbiamo lavorato principalmente sulla disposizione degli elementi nella pagina Discover e sulle dimensioni delle card.
+##1. Pagina Discover
+- Rimosso il titolo superiore «Scopri» per recuperare spazio.
+- Mantenuto il contenitore principale con globalStyles.container e gli inset della safe area.
+- Ridotto lo spazio verticale tra le tre sezioni:
+  - Di tendenza
+  - Popolari
+  - Attesi
+- Impostato marginTop={10} sulle sezioni.
+- Ridotto ulteriormente il margine della prima sezione a marginTop={0} per sfruttare lo spazio disponibile sopra.
+- Sostituito lo ScrollView verticale con una normale View, eliminando lo scorrimento verticale della pagina.
+## 2. Dimensioni delle card
+Abbiamo modificato src/utils/mediaLayout.ts per ridurre leggermente le dimensioni dei poster in tutta l'app.
+
+Valori precedenti:
+const POSTER_WIDTH = 120;
+const MOBILE_POSTER_WIDTH = 96;
+
+
+Nuovi valori:
+const POSTER_WIDTH = 108;
+const MOBILE_POSTER_WIDTH = 86;
+
+
+Il calcolo delle colonne e degli spazi si adatta automaticamente alle nuove dimensioni.
+
+La modifica interessa tutte le schermate che utilizzano getMediaCardLayout, non soltanto Discover.
+
+## 3. Home – Calendario
+Abbiamo apportato due modifiche:
+
+- Cambio filtro: risolto il problema per cui, passando da Tutti a Première o Finale, il calendario manteneva la vecchia posizione di scorrimento e poteva sembrare vuoto.
+- Aggiunto calendarScrollRef allo ScrollView orizzontale.
+- Aggiunto un useEffect che riporta lo scorrimento all'inizio quando cambia calendarFilter.
+- Stagioni con un solo episodio: abbiamo individuato un caso in cui lo stesso episodio poteva essere classificato sia come Première sia come Finale.
+- La soluzione proposta è stata sostituire il secondo if con else if, in modo che una stagione con un solo episodio venga classificata soltanto come Première.
+
+

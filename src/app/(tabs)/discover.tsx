@@ -1,10 +1,10 @@
-import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
-  ScrollView,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -33,6 +33,7 @@ import {
   TMDB_IMAGE_BASE_URL,
 } from "@/services/tmdb";
 import { colors, globalStyles } from "@/styles/global";
+import { getMediaCardLayout } from "@/utils/mediaLayout";
 import { Ionicons } from "@expo/vector-icons";
 
 type DiscoverItem = {
@@ -46,6 +47,9 @@ type DiscoverItem = {
 
 export default function Discover() {
   const insets = useSafeAreaInsets();
+  const { width: screenWidth } = useWindowDimensions();
+  const { gap, containerPadding } = getMediaCardLayout(screenWidth, false);
+
   const router = useRouter();
   const { titleLanguage } = useTitleLanguage();
 
@@ -68,9 +72,11 @@ export default function Discover() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadDiscover();
-  }, [titleLanguage]);
+  useFocusEffect(
+    useCallback(() => {
+      void loadDiscover();
+    }, [titleLanguage]),
+  );
 
   async function loadDiscover() {
     try {
@@ -307,13 +313,11 @@ export default function Discover() {
       style={[
         globalStyles.container,
         {
-          paddingTop: insets.top + 10,
-          paddingHorizontal: 20,
+          paddingTop: insets.top,
+          paddingHorizontal: containerPadding,
         },
       ]}
     >
-      <Text style={globalStyles.screenTitle}>Scopri</Text>
-
       {loading ? (
         <ActivityIndicator
           size="small"
@@ -323,15 +327,11 @@ export default function Discover() {
       ) : error ? (
         <Text style={globalStyles.empty}>{error}</Text>
       ) : (
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={{
-            paddingBottom: insets.bottom + 30,
-          }}
-        >
+        <View>
           <HorizontalMediaList
             title="Di tendenza"
             data={trending}
+            marginTop={0}
             showMore
             onMorePress={() => openSection("trending")}
             renderItem={({ item }) => renderMediaItem(item)}
@@ -341,6 +341,7 @@ export default function Discover() {
           <HorizontalMediaList
             title="Popolari"
             data={popular}
+            marginTop={0}
             showMore
             onMorePress={() => openSection("popular")}
             renderItem={({ item }) => renderMediaItem(item)}
@@ -350,6 +351,7 @@ export default function Discover() {
           <HorizontalMediaList
             title="Attesi"
             data={upcoming}
+            marginTop={0}
             renderItem={({ item }) => (
               <MediaCard
                 title={item.title}
@@ -365,7 +367,7 @@ export default function Discover() {
             )}
             keyExtractor={(item) => `${item.type}-${item.id}`}
           />
-        </ScrollView>
+        </View>
       )}
     </View>
   );
